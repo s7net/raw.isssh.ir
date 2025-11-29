@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 
 INCLUDE_SYSTEM_PHP=true
+PANEL="Unknown"
 
 php_bins=()
 
 if [[ -d /usr/local/directadmin ]]; then
+  PANEL="DirectAdmin"
   for bin in /usr/local/php*/bin/php; do
     [[ -x "$bin" ]] && php_bins+=("$bin")
   done
 elif [[ -d /opt/cpanel ]]; then
+  PANEL="cPanel"
   for bin in /opt/cpanel/ea-php*/root/usr/bin/php; do
     [[ -x "$bin" ]] && php_bins+=("$bin")
   done
@@ -25,31 +28,46 @@ fi
 
 php_bins=($(printf "%s\n" "${php_bins[@]}" | awk '!seen[$0]++'))
 
-echo "Detected PHP binaries:"
-echo "----------------------"
-i=1
-for bin in "${php_bins[@]}"; do
-  ver="$("$bin" -v 2>/dev/null | head -n1)"
-  [[ -z "$ver" ]] && ver="(version unknown)"
-  printf " [%d] %s\n     %s\n\n" "$i" "$ver" "$bin"
-  ((i++))
-done
-
-read -rp "Select the PHP version number to use: " choice
-
-if ! [[ "$choice" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#php_bins[@]} )); then
-  echo "Invalid choice."
-  exit 1
-fi
-
-selected_php="${php_bins[$((choice-1))]}"
-
-clear
-echo "Using PHP binary: $selected_php"
-echo
+selected_php=""
 
 while true; do
+  if [[ -z "$selected_php" ]]; then
+    clear
+    echo "Control panel detected: $PANEL"
+    echo
+    echo "Detected PHP binaries:"
+    echo "----------------------"
+    i=1
+    for bin in "${php_bins[@]}"; do
+      ver="$("$bin" -v 2>/dev/null | head -n1)"
+      [[ -z "$ver" ]] && ver="(version unknown)"
+      printf " [%d] %s\n     %s\n\n" "$i" "$ver" "$bin"
+      ((i++))
+    done
+
+    read -rp "Select the PHP version number to use (or 0 to quit): " choice
+
+    if [[ "$choice" == "0" ]]; then
+      clear
+      echo "Bye."
+      exit 0
+    fi
+
+    if ! [[ "$choice" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#php_bins[@]} )); then
+      echo "Invalid choice."
+      sleep 1
+      continue
+    fi
+
+    selected_php="${php_bins[$((choice-1))]}"
+    clear
+    echo "Control panel detected: $PANEL"
+    echo "Using PHP binary: $selected_php"
+    echo
+  fi
+
   echo "================ PHP Environment Inspector ================"
+  echo "Control panel: $PANEL"
   echo "Using: $selected_php"
   echo
   echo "Select a section to view:"
@@ -60,6 +78,7 @@ while true; do
   echo "  5) Disabled Dangerous Functions"
   echo "  6) Raw disable_functions"
   echo "  7) Show ALL sections"
+  echo "  9) Change PHP version"
   echo "  0) Quit"
   echo "--------------------------------------------------------"
   read -rp "Enter choice: " sec
@@ -69,6 +88,11 @@ while true; do
       clear
       echo "Bye."
       exit 0
+      ;;
+    9)
+      selected_php=""
+      clear
+      continue
       ;;
     1) SECTION="general" ;;
     2) SECTION="sg" ;;
@@ -86,6 +110,9 @@ while true; do
   esac
 
   clear
+  echo "Control panel: $PANEL"
+  echo "Using: $selected_php"
+  echo
   echo "=== Section: $SECTION ==="
   echo
 
