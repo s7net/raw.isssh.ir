@@ -28,6 +28,164 @@ fi
 
 php_bins=($(printf "%s\n" "${php_bins[@]}" | awk '!seen[$0]++'))
 
+HELPER="/tmp/php_env_inspector_helper.php"
+
+cat <<'PHP' > "$HELPER"
+#!/usr/bin/env php
+<?php
+function color($t,$c){return "\033[".$c."m".$t."\033[0m";}
+$section=$argv[1]??'all';
+
+$activeModules=get_loaded_extensions();
+sort($activeModules);
+
+$allKnownModules=[
+"bcmath","bz2","calendar","Core","ctype","curl","date","dba","dom","exif","FFI",
+"fileinfo","filter","ftp","gd","gettext","gmp","hash","iconv","imap","intl","json",
+"ldap","libxml","mbstring","mysqli","mysqlnd","odbc","openssl","pcntl","pcre","PDO",
+"pdo_mysql","pdo_pgsql","pdo_sqlite","pdo_odbc","Phar","posix","readline","Reflection",
+"session","shmop","SimpleXML","snmp","soap","sockets","sodium","sqlite3","standard",
+"sysvmsg","sysvsem","sysvshm","tokenizer","xml","xmlreader","xmlwriter","xsl",
+"Zend OPcache","zip","zlib","imagick","ionCube Loader","apcu","redis","memcached"
+];
+sort($allKnownModules);
+
+$inactiveModules=array_diff($allKnownModules,$activeModules);
+
+$phpVersion=phpversion();
+$server=$_SERVER['SERVER_SOFTWARE']??'Unknown (CLI or not set)';
+$os=php_uname();
+$memoryLimit=ini_get('memory_limit');
+$uploadMax=ini_get('upload_max_filesize');
+$postMax=ini_get('post_max_size');
+$maxExecTime=ini_get('max_execution_time');
+$maxInputVars=ini_get('max_input_vars');
+$displayErr=ini_get('display_errors')?'On':'Off';
+$allowUrlFopen=ini_get('allow_url_fopen')?'On':'Off';
+$phpIniPath=php_ini_loaded_file()?:'Unknown';
+$zendVersion=zend_version();
+
+$dangerousFuncs=[
+"shell_exec","system","passthru","exec","popen","ini_restore","socket_create",
+"socket_create_listen","socket_create_pair","socket_listen","socket_bind","symlink",
+"link","pfsockopen","ini_alter","dl","pcntl_exec","pcntl_fork","proc_close",
+"proc_open","proc_terminate","posix_kill","posix_mkfifo","posix_setpgid",
+"posix_setsid","posix_setuid","posix_setgid","posix_uname","show_source",
+"getfile","mkfifo"
+];
+
+$disabledFuncs=ini_get('disable_functions');
+$disabledFuncs=$disabledFuncs?array_map('trim',explode(',',$disabledFuncs)):[];
+$reallyDisabled=array_intersect($dangerousFuncs,$disabledFuncs);
+
+$sourceGuardianStatus=extension_loaded('SourceGuardian')?'Enabled':'Disabled';
+$ioncubeStatus=extension_loaded('ionCube Loader')?'Enabled':'Disabled';
+$sourceGuardianVersion=$sourceGuardianStatus==='Enabled'&&phpversion('SourceGuardian')?phpversion('SourceGuardian'):'-';
+$ioncubeVersion=$ioncubeStatus==='Enabled'&&function_exists('ioncube_loader_version')?ioncube_loader_version():'-';
+
+function print_general($phpVersion,$zendVersion,$server,$os,$phpIniPath,$memoryLimit,$uploadMax,$postMax,$maxExecTime,$maxInputVars,$displayErr,$allowUrlFopen){
+  echo color("General Info","1;34").PHP_EOL;
+  echo str_repeat("-",60).PHP_EOL;
+  echo "PHP Version        : $phpVersion\n";
+  echo "Zend Engine        : $zendVersion\n";
+  echo "Server Software    : $server\n";
+  echo "Operating System   : $os\n";
+  echo "Loaded php.ini     : $phpIniPath\n";
+  echo "memory_limit       : $memoryLimit\n";
+  echo "upload_max_filesize: $uploadMax\n";
+  echo "post_max_size      : $postMax\n";
+  echo "max_execution_time : $maxExecTime seconds\n";
+  echo "max_input_vars     : ".($maxInputVars?:'not set')."\n";
+  echo "display_errors     : $displayErr\n";
+  echo "allow_url_fopen    : $allowUrlFopen\n";
+  echo str_repeat("-",60).PHP_EOL.PHP_EOL;
+}
+
+function print_sg($sourceGuardianStatus,$sourceGuardianVersion,$ioncubeStatus,$ioncubeVersion){
+  echo color("SourceGuardian / ionCube","1;34").PHP_EOL;
+  echo str_repeat("-",60).PHP_EOL;
+  echo "SourceGuardian:\n";
+  echo "  Status : $sourceGuardianStatus\n";
+  echo "  Version: $sourceGuardianVersion\n\n";
+  echo "ionCube Loader:\n";
+  echo "  Status : $ioncubeStatus\n";
+  echo "  Version: $ioncubeVersion\n";
+  echo str_repeat("-",60).PHP_EOL.PHP_EOL;
+}
+
+function print_active($activeModules){
+  echo color("Active Extensions","1;34").PHP_EOL;
+  echo str_repeat("-",60).PHP_EOL;
+  echo "Active extensions (".count($activeModules)."):\n";
+  echo $activeModules?implode(", ",$activeModules):"(none)";
+  echo PHP_EOL.str_repeat("-",60).PHP_EOL.PHP_EOL;
+}
+
+function print_inactive($inactiveModules){
+  echo color("Inactive Known Extensions","1;34").PHP_EOL;
+  echo str_repeat("-",60).PHP_EOL;
+  echo "Inactive known extensions (".count($inactiveModules)."):\n";
+  echo $inactiveModules?implode(", ",$inactiveModules):"(none or not detectable)";
+  echo PHP_EOL.str_repeat("-",60).PHP_EOL.PHP_EOL;
+}
+
+function print_danger($reallyDisabled){
+  echo color("Disabled Dangerous Functions","1;34").PHP_EOL;
+  echo str_repeat("-",60).PHP_EOL;
+  if($reallyDisabled){
+    echo "These high-risk functions are disabled:\n";
+    echo implode(", ",$reallyDisabled).PHP_EOL;
+  } else {
+    echo "No dangerous functions disabled (or disable_functions is empty).\n";
+  }
+  echo str_repeat("-",60).PHP_EOL.PHP_EOL;
+}
+
+function print_raw($disabledFuncs){
+  echo color("Raw disable_functions","1;34").PHP_EOL;
+  echo str_repeat("-",60).PHP_EOL;
+  if($disabledFuncs){
+    echo "disable_functions list:\n";
+    echo implode(", ",$disabledFuncs).PHP_EOL;
+  } else {
+    echo "(disable_functions is empty)\n";
+  }
+  echo str_repeat("-",60).PHP_EOL.PHP_EOL;
+}
+
+switch($section){
+  case 'general':
+    print_general($phpVersion,$zendVersion,$server,$os,$phpIniPath,$memoryLimit,$uploadMax,$postMax,$maxExecTime,$maxInputVars,$displayErr,$allowUrlFopen);
+    break;
+  case 'sg':
+    print_sg($sourceGuardianStatus,$sourceGuardianVersion,$ioncubeStatus,$ioncubeVersion);
+    break;
+  case 'active':
+    print_active($activeModules);
+    break;
+  case 'inactive':
+    print_inactive($inactiveModules);
+    break;
+  case 'danger':
+    print_danger($reallyDisabled);
+    break;
+  case 'raw':
+    print_raw($disabledFuncs);
+    break;
+  case 'all':
+  default:
+    print_general($phpVersion,$zendVersion,$server,$os,$phpIniPath,$memoryLimit,$uploadMax,$postMax,$maxExecTime,$maxInputVars,$displayErr,$allowUrlFopen);
+    print_sg($sourceGuardianStatus,$sourceGuardianVersion,$ioncubeStatus,$ioncubeVersion);
+    print_active($activeModules);
+    print_inactive($inactiveModules);
+    print_danger($reallyDisabled);
+    print_raw($disabledFuncs);
+    break;
+}
+PHP
+
+chmod +x "$HELPER"
+
 selected_php=""
 
 while true; do
@@ -116,106 +274,7 @@ while true; do
   echo "=== Section: $SECTION ==="
   echo
 
-  SECTION="$SECTION" "$selected_php" <<'PHP'
-<?php
-
-function color($t,$c){return "\033[".$c."m".$t."\033[0m";}
-
-$section=getenv('SECTION')?:'general';
-
-$active=get_loaded_extensions();sort($active);
-$all=["bcmath","bz2","calendar","Core","ctype","curl","date","dba","dom","exif","FFI","fileinfo","filter","ftp","gd","gettext","gmp","hash","iconv","imap","intl","json","ldap","libxml","mbstring","mysqli","mysqlnd","odbc","openssl","pcntl","pcre","PDO","pdo_mysql","pdo_pgsql","pdo_sqlite","pdo_odbc","Phar","posix","readline","Reflection","session","shmop","SimpleXML","snmp","soap","sockets","sodium","sqlite3","standard","sysvmsg","sysvsem","sysvshm","tokenizer","xml","xmlreader","xmlwriter","xsl","Zend OPcache","zip","zlib","imagick","ionCube Loader","apcu","redis","memcached"];
-sort($all);
-$inactive=array_diff($all,$active);
-
-$pv=phpversion();
-$srv=$_SERVER['SERVER_SOFTWARE']??'Unknown';
-$os=php_uname();
-$mem=ini_get('memory_limit');
-$upl=ini_get('upload_max_filesize');
-$post=ini_get('post_max_size');
-$met=ini_get('max_execution_time');
-$miv=ini_get('max_input_vars');
-$dis=ini_get('display_errors')?'On':'Off';
-$auf=ini_get('allow_url_fopen')?'On':'Off';
-$ini=php_ini_loaded_file()?:'Unknown';
-$zend=zend_version();
-
-$df=["shell_exec","system","passthru","exec","popen","ini_restore","socket_create","socket_create_listen","socket_create_pair","socket_listen","socket_bind","symlink","link","pfsockopen","ini_alter","dl","pcntl_exec","pcntl_fork","proc_close","proc_open","proc_terminate","posix_kill","posix_mkfifo","posix_setpgid","posix_setsid","posix_setuid","posix_setgid","posix_uname","show_source","getfile","mkfifo"];
-$disabled=ini_get('disable_functions');
-$disabled=$disabled?array_map('trim',explode(',',$disabled)):[];
-$real=array_intersect($df,$disabled);
-
-$sg=extension_loaded('SourceGuardian');
-$ic=extension_loaded('ionCube Loader');
-$sgs=$sg?'Enabled':'Disabled';
-$ics=$ic?'Enabled':'Disabled';
-$sgv=$sg?phpversion('SourceGuardian'):'-';
-$icv=($ic&&function_exists('ioncube_loader_version'))?ioncube_loader_version():'-';
-
-function general($pv,$zend,$srv,$os,$ini,$mem,$upl,$post,$met,$miv,$dis,$auf){
-  echo color("General Info","1;34").PHP_EOL;
-  echo str_repeat("-",60).PHP_EOL;
-  echo "PHP Version        : $pv\nZend Engine        : $zend\nServer Software    : $srv\nOperating System   : $os\nLoaded php.ini     : $ini\nmemory_limit       : $mem\nupload_max_filesize: $upl\npost_max_size      : $post\nmax_execution_time : $met seconds\nmax_input_vars     : ".($miv?:'not set')."\ndisplay_errors     : $dis\nallow_url_fopen    : $auf\n";
-  echo str_repeat("-",60).PHP_EOL.PHP_EOL;
-}
-
-function sgic($sgs,$sgv,$ics,$icv){
-  echo color("SourceGuardian / ionCube","1;34").PHP_EOL;
-  echo str_repeat("-",60).PHP_EOL;
-  echo "SourceGuardian:\n  Status : $sgs\n  Version: $sgv\n\nionCube Loader:\n  Status : $ics\n  Version: $icv\n";
-  echo str_repeat("-",60).PHP_EOL.PHP_EOL;
-}
-
-function active($a){
-  echo color("Active Extensions","1;34").PHP_EOL;
-  echo str_repeat("-",60).PHP_EOL;
-  echo "Active extensions (".count($a)."):\n";
-  echo $a?implode(", ",$a):"(none)";
-  echo PHP_EOL.str_repeat("-",60).PHP_EOL.PHP_EOL;
-}
-
-function inactive($a){
-  echo color("Inactive Known Extensions","1;34").PHP_EOL;
-  echo str_repeat("-",60).PHP_EOL;
-  echo "Inactive known extensions (".count($a)."):\n";
-  echo $a?implode(", ",$a):"(none or not detectable)";
-  echo PHP_EOL.str_repeat("-",60).PHP_EOL.PHP_EOL;
-}
-
-function danger($r){
-  echo color("Disabled Dangerous Functions","1;34").PHP_EOL;
-  echo str_repeat("-",60).PHP_EOL;
-  if($r){echo "These high-risk functions are disabled:\n".implode(", ",$r).PHP_EOL;}
-  else{echo "No dangerous functions disabled.\n";}
-  echo str_repeat("-",60).PHP_EOL.PHP_EOL;
-}
-
-function rawdf($d){
-  echo color("Raw disable_functions","1;34").PHP_EOL;
-  echo str_repeat("-",60).PHP_EOL;
-  echo $d?"disable_functions list:\n".implode(", ",$d):"(disable_functions is empty)";
-  echo PHP_EOL.str_repeat("-",60).PHP_EOL.PHP_EOL;
-}
-
-switch($section){
-  case 'general': general($pv,$zend,$srv,$os,$ini,$mem,$upl,$post,$met,$miv,$dis,$auf); break;
-  case 'sg': sgic($sgs,$sgv,$ics,$icv); break;
-  case 'active': active($active); break;
-  case 'inactive': inactive($inactive); break;
-  case 'danger': danger($real); break;
-  case 'raw': rawdf($disabled); break;
-  case 'all':
-  default:
-    general($pv,$zend,$srv,$os,$ini,$mem,$upl,$post,$met,$miv,$dis,$auf);
-    sgic($sgs,$sgv,$ics,$icv);
-    active($active);
-    inactive($inactive);
-    danger($real);
-    rawdf($disabled);
-    break;
-}
-PHP
+  "$selected_php" "$HELPER" "$SECTION"
 
   echo
   read -rp "Press Enter to go back to menu..." _
