@@ -1,77 +1,83 @@
 #!/bin/bash
 
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+declare -A CONFIGS=(
+    [1]="256M:3000:32M:32M:60:60"
+    [2]="512M:6000:64M:64M:120:120"
+    [3]="1024M:10000:128M:128M:180:180"
+    [4]="1536M:20000:256M:256M:240:240"
+    [5]="2048M:30000:512M:512M:300:300"
+)
 PHP_LIST=""
+LEVEL="0"
+DEFAULT_LEVEL_0="1024M:10000:128M:128M:180:180"
 
-while getopts "p:" opt; do
-    case "$opt" in
-        p) PHP_LIST="$OPTARG" ;;
-    esac
-done
-shift $((OPTIND-1))
+print_separator() {
+    printf "${CYAN}%.0s${NC}" {1..60}; echo
+}
 
-LEVEL="${1:-0}"
+print_status() {
+    local status=$1
+    local message=$2
+    if [[ "$status" == "OK" ]]; then
+        echo -e "${GREEN}  [ OK ]${NC} ${message}"
+    else
+        echo -e "${RED} [ FAIL ]${NC} ${message}"
+    fi
+}
 
 ask_value() {
     local text="$1"
     local default="$2"
-    read -p "$text ($default): " val
+    read -r -p "  ${CYAN}>> ${NC}${text} (${YELLOW}$default${NC}): " val
     echo "${val:-$default}"
 }
 
-if [[ "$LEVEL" = "0" ]]; then
-    memory_limit=$(ask_value "memory_limit" "1024M")
-    max_input_vars=$(ask_value "max_input_vars" "10000")
-    post_max_size=$(ask_value "post_max_size" "128M")
-    upload_max_filesize=$(ask_value "upload_max_filesize" "128M")
-    max_execution_time=$(ask_value "max_execution_time" "180")
-    max_input_time=$(ask_value "max_input_time" "180")
-else
-    case "$LEVEL" in
-        1)
-            memory_limit="256M"
-            max_input_vars="3000"
-            post_max_size="32M"
-            upload_max_filesize="32M"
-            max_execution_time="60"
-            max_input_time="60"
-            ;;
-        2)
-            memory_limit="512M"
-            max_input_vars="6000"
-            post_max_size="64M"
-            upload_max_filesize="64M"
-            max_execution_time="120"
-            max_input_time="120"
-            ;;
-        3)
-            memory_limit="1024M"
-            max_input_vars="10000"
-            post_max_size="128M"
-            upload_max_filesize="128M"
-            max_execution_time="180"
-            max_input_time="180"
-            ;;
-        4)
-            memory_limit="1536M"
-            max_input_vars="20000"
-            post_max_size="256M"
-            upload_max_filesize="256M"
-            max_execution_time="240"
-            max_input_time="240"
-            ;;
-        5)
-            memory_limit="2048M"
-            max_input_vars="30000"
-            post_max_size="512M"
-            upload_max_filesize="512M"
-            max_execution_time="300"
-            max_input_time="300"
-            ;;
-        *)
-            echo "Invalid level. Only 0 to 5 are allowed."
+while getopts "p:" opt; do
+    case "$opt" in
+        p) PHP_LIST="$OPTARG" ;;
+        \?)
+            echo -e "${RED}Error:${NC} Invalid option: -$OPTARG" >&2
             exit 1
             ;;
     esac
+done
+shift $((OPTIND-1))
+
+if [[ -n "$1" ]]; then
+    LEVEL="$1"
+fi
+
+print_separator
+echo -e "${PURPLE}🚀 PHP Configuration Updater (v1.0)${NC}"
+print_separator
+
+if [[ "$LEVEL" == "0" ]]; then
+    echo -e "${BLUE}ℹ️  Mode: Interactive (Level 0)${NC}"
+    echo "Please define your custom settings:"
+    
+    IFS=':' read -r memory_limit max_input_vars post_max_size upload_max_filesize max_execution_time max_input_time <<< "$DEFAULT_LEVEL_0"
+
+    memory_limit=$(ask_value "memory_limit" "$memory_limit")
+    max_input_vars=$(ask_value "max_input_vars" "$max_input_vars")
+    post_max_size=$(ask_value "post_max_size" "$post_max_size")
+    upload_max_filesize=$(ask_value "upload_max_filesize" "$upload_max_filesize")
+    max_execution_time=$(ask_value "max_execution_time" "$max_execution_time")
+    max_input_time=$(ask_value "max_input_time" "$max_input_time")
+
+elif [[ -n "${CONFIGS[$LEVEL]}" ]]; then
+    echo -e "${BLUE}ℹ️  Mode: Preset (Level ${LEVEL})${NC}"
+    IFS=':' read -r memory_limit max_input_vars post_max_size upload_max_filesize max_execution_time max_input_time <<< "${CONFIGS[$LEVEL]}"
+else
+    echo -e "${RED}❌ Invalid level '${LEVEL}'. Only 0 to 5 are allowed.${NC}"
+    exit 1
 fi
 
 inis=()
@@ -91,29 +97,34 @@ else
 fi
 
 if [[ "${#inis[@]}" -eq 0 ]]; then
-    echo "No valid php.ini files found."
+    echo -e "${RED}❌ No valid php.ini files found. Exiting.${NC}"
     exit 1
 fi
 
-echo "Selected configuration:"
-echo "memory_limit = ${memory_limit}"
-echo "max_input_vars = ${max_input_vars}"
-echo "post_max_size = ${post_max_size}"
-echo "upload_max_filesize = ${upload_max_filesize}"
-echo "max_execution_time = ${max_execution_time}"
-echo "max_input_time = ${max_input_time}"
+print_separator
+echo -e "${PURPLE}✅ Selected Configuration:${NC}"
+echo -e "  ${YELLOW}memory_limit${NC}      = ${memory_limit}"
+echo -e "  ${YELLOW}max_input_vars${NC}    = ${max_input_vars}"
+echo -e "  ${YELLOW}post_max_size${NC}     = ${post_max_size}"
+echo -e "  ${YELLOW}upload_max_filesize${NC} = ${upload_max_filesize}"
+echo -e "  ${YELLOW}max_execution_time${NC}  = ${max_execution_time}"
+echo -e "  ${YELLOW}max_input_time${NC}    = ${max_input_time}"
+print_separator
 
-printf '=%.0s' {1..60}
-echo
+echo -e "${PURPLE}🛠️ Applying settings to ${#inis[@]} file(s)...${NC}"
 
 for ini in "${inis[@]}"; do
     ver="$(basename "$(dirname "$(dirname "$ini")")")"
 
-    cp "$ini" "${ini}.bak-$(date +%F-%H%M%S)"
+    backup_file="${ini}.bak-$(date +%F-%H%M%S)"
+    cp "$ini" "$backup_file"
+    echo -e "${CYAN}  -> Processing ${ver} ($ini)${NC}"
+    echo -e "${CYAN}     Backup created: ${backup_file}${NC}"
 
-    sed -i -E '/^(memory_limit|max_input_vars|post_max_size|upload_max_filesize|max_execution_time|max_input_time)[[:space:]]*=/d' "$ini"
+    sed -i -E '/^[[:space:]]*(;)?(memory_limit|max_input_vars|post_max_size|upload_max_filesize|max_execution_time|max_input_time)[[:space:]]*=/d' "$ini"
 
-    printf '%s\n' \
+    printf '\n%s\n' \
+    "; --- Added by PHP Configuration Updater ---" \
     "memory_limit = ${memory_limit}" \
     "max_input_vars = ${max_input_vars}" \
     "post_max_size = ${post_max_size}" \
@@ -130,15 +141,18 @@ for ini in "${inis[@]}"; do
     grep -Eq "^[[:space:]]*max_input_time[[:space:]]*=[[:space:]]*${max_input_time}[[:space:]]*$" "$ini" || ok=0
 
     if [[ "$ok" -eq 1 ]]; then
-        echo "${ver}: Settings applied successfully"
+        print_status "OK" "${ver}: Settings applied successfully."
     else
-        echo "${ver}: Error applying settings"
+        print_status "FAIL" "${ver}: Error applying settings. Please check ${ini}."
     fi
 done
 
-printf '=%.0s' {1..60}
-echo
+print_separator
 
+echo -e "${PURPLE}⚙️ Executing build rewrite_confs command...${NC}"
 da build rewrite_confs
+print_status "OK" "Command completed."
 
-echo "PHP settings update completed."
+print_separator
+echo -e "${GREEN}✨ PHP settings update completed successfully!${NC}"
+print_separator
