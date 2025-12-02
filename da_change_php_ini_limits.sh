@@ -62,9 +62,12 @@ echo
 
 for ini in /usr/local/php*/lib/php.ini; do
     if [[ -f "$ini" ]]; then
-        ver="$(basename "$(dirname "$ini")")"
+        ver="$(basename "$(dirname "$(dirname "$ini")")")"
+
         cp "$ini" "${ini}.bak-$(date +%F-%H%M%S)"
+
         sed -i -E '/^(memory_limit|max_input_vars|post_max_size|upload_max_filesize|max_execution_time|max_input_time)[[:space:]]*=/d' "$ini"
+
         printf '%s\n' \
         "memory_limit = ${memory_limit}" \
         "max_input_vars = ${max_input_vars}" \
@@ -74,20 +77,23 @@ for ini in /usr/local/php*/lib/php.ini; do
         "max_input_time = ${max_input_time}" >> "$ini"
 
         ok=1
-        grep -Eq "^[[:space:]]*memory_limit[[:space:]]*=[[:space:]]*${memory_limit}[[:space:]]*$" "$ini" || ok=0
-        grep -Eq "^[[:space:]]*max_input_vars[[:space:]]*=[[:space:]]*${max_input_vars}[[:space:]]*$" "$ini" || ok=0
-        grep -Eq "^[[:space:]]*post_max_size[[:space:]]*=[[:space:]]*${post_max_size}[[:space:]]*$" "$ini" || ok=0
-        grep -Eq "^[[:space:]]*upload_max_filesize[[:space:]]*=[[:space:]]*${upload_max_filesize}[[:space:]]*$" "$ini" || ok=0
-        grep -Eq "^[[:space:]]*max_execution_time[[:space:]]*=[[:space:]]*${max_execution_time}[[:space:]]*$" "$ini" || ok=0
-        grep -Eq "^[[:space:]]*max_input_time[[:space:]]*=[[:space:]]*${max_input_time}[[:space:]]*$" "$ini" || ok=0
+        grep -Eq "memory_limit[[:space:]]*=[[:space:]]*${memory_limit}$" "$ini" || ok=0
+        grep -Eq "max_input_vars[[:space:]]*=[[:space:]]*${max_input_vars}$" "$ini" || ok=0
+        grep -Eq "post_max_size[[:space:]]*=[[:space:]]*${post_max_size}$" "$ini" || ok=0
+        grep -Eq "upload_max_filesize[[:space:]]*=[[:space:]]*${upload_max_filesize}$" "$ini" || ok=0
+        grep -Eq "max_execution_time[[:space:]]*=[[:space:]]*${max_execution_time}$" "$ini" || ok=0
+        grep -Eq "max_input_time[[:space:]]*=[[:space:]]*${max_input_time}$" "$ini" || ok=0
 
         if [[ "$ok" -eq 1 ]]; then
-            echo "${ver}: OK"
+            echo "${ver}: Settings Applied Successfully"
         else
-            echo "${ver}: FAILED"
+            echo "${ver}: ERROR Applying Settings"
         fi
     fi
 done
+
+printf '=%.0s' {1..60}
+echo
 
 da build rewrite_confs
 
