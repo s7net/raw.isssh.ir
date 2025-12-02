@@ -1,13 +1,5 @@
 #!/bin/bash
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-BLUE='\033[0;34m'
-PURPLE='\033[0;35m'
-CYAN='\033[0;36m'
-NC='\033[0m'
-
 declare -A CONFIGS=(
     [1]="256M:3000:32M:32M:60:60"
     [2]="512M:6000:64M:64M:120:120"
@@ -20,23 +12,23 @@ LEVEL="0"
 DEFAULT_LEVEL_0="1024M:10000:128M:128M:180:180"
 
 print_separator() {
-    printf "${CYAN}%.0s${NC}" {1..60}; echo
+    printf '=%.0s' {1..60}; echo
 }
 
 print_status() {
     local status=$1
     local message=$2
     if [[ "$status" == "OK" ]]; then
-        echo -e "${GREEN}  [ OK ]${NC} ${message}"
+        echo "  [ OK ] $message"
     else
-        echo -e "${RED} [ FAIL ]${NC} ${message}"
+        echo " [ FAIL ] $message"
     fi
 }
 
 ask_value() {
     local text="$1"
     local default="$2"
-    read -r -p "  ${CYAN}>> ${NC}${text} (${YELLOW}$default${NC}): " val
+    read -r -p "  >> $text ($default): " val
     echo "${val:-$default}"
 }
 
@@ -44,7 +36,7 @@ while getopts "p:" opt; do
     case "$opt" in
         p) PHP_LIST="$OPTARG" ;;
         \?)
-            echo -e "${RED}Error:${NC} Invalid option: -$OPTARG" >&2
+            echo "❌ Error: Invalid option: -$OPTARG" >&2
             exit 1
             ;;
     esac
@@ -56,11 +48,11 @@ if [[ -n "$1" ]]; then
 fi
 
 print_separator
-echo -e "${PURPLE}🚀 PHP Configuration Updater (v1.0)${NC}"
+echo "🚀 PHP Configuration Updater (v1.0)"
 print_separator
 
 if [[ "$LEVEL" == "0" ]]; then
-    echo -e "${BLUE}ℹ️  Mode: Interactive (Level 0)${NC}"
+    echo "ℹ️  Mode: Interactive (Level 0)"
     echo "Please define your custom settings:"
     
     IFS=':' read -r memory_limit max_input_vars post_max_size upload_max_filesize max_execution_time max_input_time <<< "$DEFAULT_LEVEL_0"
@@ -73,10 +65,10 @@ if [[ "$LEVEL" == "0" ]]; then
     max_input_time=$(ask_value "max_input_time" "$max_input_time")
 
 elif [[ -n "${CONFIGS[$LEVEL]}" ]]; then
-    echo -e "${BLUE}ℹ️  Mode: Preset (Level ${LEVEL})${NC}"
+    echo "ℹ️  Mode: Preset (Level ${LEVEL})"
     IFS=':' read -r memory_limit max_input_vars post_max_size upload_max_filesize max_execution_time max_input_time <<< "${CONFIGS[$LEVEL]}"
 else
-    echo -e "${RED}❌ Invalid level '${LEVEL}'. Only 0 to 5 are allowed.${NC}"
+    echo "❌ Invalid level '${LEVEL}'. Only 0 to 5 are allowed."
     exit 1
 fi
 
@@ -97,29 +89,29 @@ else
 fi
 
 if [[ "${#inis[@]}" -eq 0 ]]; then
-    echo -e "${RED}❌ No valid php.ini files found. Exiting.${NC}"
+    echo "❌ No valid php.ini files found. Exiting."
     exit 1
 fi
 
 print_separator
-echo -e "${PURPLE}✅ Selected Configuration:${NC}"
-echo -e "  ${YELLOW}memory_limit${NC}      = ${memory_limit}"
-echo -e "  ${YELLOW}max_input_vars${NC}    = ${max_input_vars}"
-echo -e "  ${YELLOW}post_max_size${NC}     = ${post_max_size}"
-echo -e "  ${YELLOW}upload_max_filesize${NC} = ${upload_max_filesize}"
-echo -e "  ${YELLOW}max_execution_time${NC}  = ${max_execution_time}"
-echo -e "  ${YELLOW}max_input_time${NC}    = ${max_input_time}"
+echo "✅ Selected Configuration:"
+echo "  memory_limit      = ${memory_limit}"
+echo "  max_input_vars    = ${max_input_vars}"
+echo "  post_max_size     = ${post_max_size}"
+echo "  upload_max_filesize = ${upload_max_filesize}"
+echo "  max_execution_time  = ${max_execution_time}"
+echo "  max_input_time    = ${max_input_time}"
 print_separator
 
-echo -e "${PURPLE}🛠️ Applying settings to ${#inis[@]} file(s)...${NC}"
+echo "🛠️ Applying settings to ${#inis[@]} file(s)..."
 
 for ini in "${inis[@]}"; do
     ver="$(basename "$(dirname "$(dirname "$ini")")")"
 
     backup_file="${ini}.bak-$(date +%F-%H%M%S)"
     cp "$ini" "$backup_file"
-    echo -e "${CYAN}  -> Processing ${ver} ($ini)${NC}"
-    echo -e "${CYAN}     Backup created: ${backup_file}${NC}"
+    echo "  -> Processing ${ver} ($ini)"
+    echo "     Backup created: ${backup_file}"
 
     sed -i -E '/^[[:space:]]*(;)?(memory_limit|max_input_vars|post_max_size|upload_max_filesize|max_execution_time|max_input_time)[[:space:]]*=/d' "$ini"
 
@@ -149,10 +141,10 @@ done
 
 print_separator
 
-echo -e "${PURPLE}⚙️ Executing build rewrite_confs command...${NC}"
+echo "⚙️ Executing build rewrite_confs command..."
 da build rewrite_confs
 print_status "OK" "Command completed."
 
 print_separator
-echo -e "${GREEN}✨ PHP settings update completed successfully!${NC}"
+echo "✨ PHP settings update completed successfully!"
 print_separator
