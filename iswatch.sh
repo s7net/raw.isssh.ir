@@ -1,0 +1,55 @@
+#!/bin/bash
+
+clear
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+DOMAIN_REGEX='^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$'
+
+while true; do
+    read -p "Enter domain (example: isssh.ir): " DOMAIN
+
+    if [ -z "$DOMAIN" ]; then
+        echo -e "${RED}Domain cannot be empty. Please try again.${NC}"
+        continue
+    fi
+
+    if [[ ! "$DOMAIN" =~ $DOMAIN_REGEX ]]; then
+        echo -e "${RED}Invalid domain format. Example of valid format: example.com${NC}"
+        continue
+    fi
+
+    break
+done
+
+LOGFILE="/var/log/httpd/domains/${DOMAIN}.error.log"
+
+if [ ! -f "$LOGFILE" ]; then
+    echo -e "${RED}Log file not found:${NC} $LOGFILE"
+    exit 1
+fi
+
+echo -e "${GREEN}Monitoring:${NC} $LOGFILE"
+echo -e "${BLUE}--------------------------------------------------${NC}"
+
+trap "echo -e '\n${YELLOW}Stopped monitoring.${NC}'; exit" SIGINT
+
+highlight() {
+    local line="$1"
+    line=$(echo "$line" \
+        | sed -e "s/error/${RED}ERROR${NC}/Ig" \
+              -e "s/warning/${YELLOW}WARNING${NC}/Ig" \
+              -e "s/critical/${RED}CRITICAL${NC}/Ig")
+    echo -e "$line"
+}
+
+tail -n 0 -f "$LOGFILE" | while read LINE; do
+    TS=$(date +"%Y-%m-%d %H:%M:%S")
+    echo -e "${GREEN}[$TS]${NC}"
+    highlight "$LINE"
+    echo -e "${BLUE}-------------------------------${NC}"
+done
