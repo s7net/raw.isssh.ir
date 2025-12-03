@@ -39,15 +39,15 @@ $dangerousFuncs = [
 
 $disabledFuncs = explode(',', ini_get('disable_functions'));
 $disabledFuncs = array_map('trim', $disabledFuncs);
-
 $reallyDisabled = array_intersect($dangerousFuncs, $disabledFuncs);
 
-/* ✅ وضعیت سورس گاردین و ionCube */
 $sourceGuardianStatus = extension_loaded('SourceGuardian') ? 'فعال' : 'غیرفعال';
 $ioncubeStatus = extension_loaded('ionCube Loader') ? 'فعال' : 'غیرفعال';
+$redisStatus = extension_loaded('redis') ? 'فعال' : 'غیرفعال';
 
 $sourceGuardianVersion = $sourceGuardianStatus === 'فعال' ? phpversion('SourceGuardian') : '-';
 $ioncubeVersion = $ioncubeStatus === 'فعال' ? ioncube_loader_version() : '-';
+$redisVersion = $redisStatus === 'فعال' ? phpversion('redis') : '-';
 ?>
 <!DOCTYPE html>
 <html lang="fa">
@@ -116,9 +116,9 @@ $ioncubeVersion = $ioncubeStatus === 'فعال' ? ioncube_loader_version() : '-'
     <tr><td><i class="fa fa-bolt"></i>Zend Engine:</td><td><?= $zendVersion ?></td></tr>
   </table>
 
-  <!-- ✅ نسخه جدید بخش زیبا برای سورس گاردین و ionCube -->
-  <h2>وضعیت سورس گاردین و ionCube</h2>
+  <h2>وضعیت سورس گاردین، ionCube و Redis</h2>
   <div class="status-card-container">
+
     <div class="status-card">
       <div class="status-icon <?= $sourceGuardianStatus === 'فعال' ? 'status-active' : 'status-inactive' ?>">
         <i class="fa fa-shield-halved"></i>
@@ -128,7 +128,7 @@ $ioncubeVersion = $ioncubeStatus === 'فعال' ? ioncube_loader_version() : '-'
         <?= $sourceGuardianStatus ?>
       </div>
       <?php if ($sourceGuardianVersion !== '-'): ?>
-        <div class="status-version">نسخه: <?= $sourceGuardianVersion ?></div>
+      <div class="status-version">نسخه: <?= $sourceGuardianVersion ?></div>
       <?php endif; ?>
     </div>
 
@@ -141,9 +141,23 @@ $ioncubeVersion = $ioncubeStatus === 'فعال' ? ioncube_loader_version() : '-'
         <?= $ioncubeStatus ?>
       </div>
       <?php if ($ioncubeVersion !== '-'): ?>
-        <div class="status-version">نسخه: <?= $ioncubeVersion ?></div>
+      <div class="status-version">نسخه: <?= $ioncubeVersion ?></div>
       <?php endif; ?>
     </div>
+
+    <div class="status-card">
+      <div class="status-icon <?= $redisStatus === 'فعال' ? 'status-active' : 'status-inactive' ?>">
+        <i class="fa fa-database"></i>
+      </div>
+      <div class="status-name">Redis (PHP Extension)</div>
+      <div class="<?= $redisStatus === 'فعال' ? 'status-active' : 'status-inactive' ?>">
+        <?= $redisStatus ?>
+      </div>
+      <?php if ($redisVersion !== '-'): ?>
+      <div class="status-version">نسخه: <?= $redisVersion ?></div>
+      <?php endif; ?>
+    </div>
+
   </div>
 
   <h2>جستجو در ماژول‌ها</h2>
