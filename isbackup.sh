@@ -109,7 +109,7 @@ if command -v pv >/dev/null 2>&1 && [[ ${FILE_SIZE} -gt 0 ]]; then
     COPY_SUCCESS=0
   fi
 elif command -v rsync >/dev/null 2>&1; then
-  if sudo rsync --progress "${SRC}" "${DST}/${BASE}"; then
+  if sudo rsync --whole-file --inplace --no-compress --info=progress2 "${SRC}" "${DST}/${BASE}"; then
     COPY_SUCCESS=1
   else
     COPY_SUCCESS=0
