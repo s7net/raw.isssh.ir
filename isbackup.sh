@@ -37,13 +37,21 @@ clear
 show_banner
 
 echo "Searching for backups matching: ${BACKUP_BASE}/*${USERNAME}*"
-echo
+SEARCH_START=$(date +%s%N)
 
 declare -A SERVER_SET
+shopt -s nullglob
 mapfile -t BACKUP_FILES < <(
-  find /home -type f -path "*/weekly*/*${USERNAME}*" -printf '%T@\t%p\n' 2>/dev/null | \
-  sort -rn | cut -f2-
+  for file in /home/*/weekly*/*${USERNAME}*; do
+    [[ -f "${file}" ]] && stat -c '%Y %n' "${file}" 2>/dev/null
+  done | sort -rn | cut -d' ' -f2-
 )
+shopt -u nullglob
+
+SEARCH_END=$(date +%s%N)
+SEARCH_TIME=$(( (SEARCH_END - SEARCH_START) / 1000000 ))
+echo "Search completed in ${SEARCH_TIME}ms"
+echo
 
 if [[ ${#BACKUP_FILES[@]} -eq 0 ]]; then
   echo "No backups found for username: ${USERNAME}"
