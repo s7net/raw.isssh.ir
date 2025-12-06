@@ -52,13 +52,35 @@ if [[ ${#BACKUP_FILES[@]} -eq 0 ]]; then
   exit 1
 fi
 
+declare -A SERVER_SET
+for file in "${BACKUP_FILES[@]}"; do
+  if [[ "${file}" =~ /home/([^/]+)/weekly ]]; then
+    SERVER_SET["${BASH_REMATCH[1]}"]=1
+  fi
+done
+
+echo "Servers with backups for '${USERNAME}':"
+echo "======================================="
+for server in $(printf '%s\n' "${!SERVER_SET[@]}" | sort); do
+  echo "  • ${server}"
+done
+echo
+
 echo "Available backups (newest first):"
 echo "================================="
 echo " 0) Latest backup (most recent)"
 for i in "${!BACKUP_FILES[@]}"; do
   file="${BACKUP_FILES[$i]}"
+  server_name=""
+  if [[ "${file}" =~ /home/([^/]+)/weekly ]]; then
+    server_name="${BASH_REMATCH[1]}"
+  fi
   file_info=$(ls -lh "${file}" 2>/dev/null | awk '{print $5, $6, $7, $8}')
-  printf "%2d) %s\n" $((i + 1)) "${file_info}"
+  if [[ -n "${server_name}" ]]; then
+    printf "%2d) [%s] %s\n" $((i + 1)) "${server_name}" "${file_info}"
+  else
+    printf "%2d) %s\n" $((i + 1)) "${file_info}"
+  fi
 done
 echo
 
