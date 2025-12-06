@@ -36,28 +36,27 @@ fi
 clear
 show_banner
 
-BACKUP_PATTERN="${BACKUP_BASE}/*${USERNAME}*"
-echo "Searching for backups matching: ${BACKUP_PATTERN}"
+echo "Searching for backups matching: ${BACKUP_BASE}/*${USERNAME}*"
 echo
 
-if ! ls -1 ${BACKUP_PATTERN} 2>/dev/null | head -n1 >/dev/null 2>&1; then
-  echo "No backups found for username: ${USERNAME}"
-  exit 1
-fi
-
-mapfile -t BACKUP_FILES < <(ls -1t ${BACKUP_PATTERN} 2>/dev/null)
+declare -A SERVER_SET
+mapfile -t BACKUP_FILES < <(
+  find /home -type f -path "*/weekly*/*${USERNAME}*" -printf '%T@\t%p\n' 2>/dev/null | \
+  sort -rn | cut -f2-
+)
 
 if [[ ${#BACKUP_FILES[@]} -eq 0 ]]; then
   echo "No backups found for username: ${USERNAME}"
   exit 1
 fi
 
-declare -A SERVER_SET
 for file in "${BACKUP_FILES[@]}"; do
   if [[ "${file}" =~ /home/([^/]+)/weekly ]]; then
     SERVER_SET["${BASH_REMATCH[1]}"]=1
   fi
 done
+
+SERVER_COUNT=${#SERVER_SET[@]}
 
 echo "Servers with backups for '${USERNAME}':"
 echo "======================================="
@@ -76,7 +75,7 @@ for i in "${!BACKUP_FILES[@]}"; do
     server_name="${BASH_REMATCH[1]}"
   fi
   file_info=$(ls -lh "${file}" 2>/dev/null | awk '{print $5, $6, $7, $8}')
-  if [[ -n "${server_name}" ]]; then
+  if [[ -n "${server_name}" ]] && [[ ${SERVER_COUNT} -gt 1 ]]; then
     printf "%2d) [%s] %s\n" $((i + 1)) "${server_name}" "${file_info}"
   else
     printf "%2d) %s\n" $((i + 1)) "${file_info}"
