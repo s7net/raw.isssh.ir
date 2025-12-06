@@ -40,17 +40,19 @@ echo "Searching for backups matching: ${BACKUP_BASE}/*${USERNAME}*"
 SEARCH_START=$(date +%s%N)
 
 declare -A SERVER_SET
-shopt -s nullglob
+shopt -s nullglob extglob
 mapfile -t BACKUP_FILES < <(
-  for file in /home/*/weekly*/*${USERNAME}*; do
-    [[ -f "${file}" ]] && stat -c '%Y %n' "${file}" 2>/dev/null
-  done | sort -rn | cut -d' ' -f2-
+  for weekly_dir in /home/*/weekly*; do
+    [[ -d "${weekly_dir}" ]] || continue
+    find "${weekly_dir}" -maxdepth 1 -type f -name "*${USERNAME}*" -printf '%T@\t%p\n' 2>/dev/null
+  done | sort -rn | cut -f2-
 )
-shopt -u nullglob
+shopt -u nullglob extglob
 
 SEARCH_END=$(date +%s%N)
-SEARCH_TIME=$(( (SEARCH_END - SEARCH_START) / 1000000 ))
-echo "Search completed in ${SEARCH_TIME}ms"
+SEARCH_TIME_NS=$((SEARCH_END - SEARCH_START))
+SEARCH_TIME_SEC=$(awk "BEGIN {printf \"%.3f\", ${SEARCH_TIME_NS} / 1000000000}")
+echo "Search completed in ${SEARCH_TIME_SEC}s"
 echo
 
 if [[ ${#BACKUP_FILES[@]} -eq 0 ]]; then
