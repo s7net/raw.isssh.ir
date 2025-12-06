@@ -2,7 +2,7 @@
 
 set -uo pipefail
 
-BACKUP_BASE="/home/lh208/weekly*"
+BACKUP_BASE="/home/*/weekly*"
 
 show_banner() {
   local CYAN='\033[0;36m'
