@@ -3,6 +3,55 @@
 set -uo pipefail
 
 BACKUP_BASE="/home/*/weekly*"
+SERVER_FILTER=""
+USERNAME=""
+
+usage() {
+  cat <<EOF
+Usage: $0 [-s server] [-u username] [username]
+
+  -s server    Filter backups by server name (e.g., lh620)
+  -u username  Username to search for
+  username     Username to search for (positional argument)
+
+If no username is provided, you'll be interactively prompted.
+By default, searches in all servers.
+EOF
+  exit 1
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -s)
+      shift
+      [[ $# -eq 0 ]] && { echo "ERROR: -s requires a server name." >&2; usage; }
+      SERVER_FILTER="$1"
+      shift
+      ;;
+    -u)
+      shift
+      [[ $# -eq 0 ]] && { echo "ERROR: -u requires a username." >&2; usage; }
+      USERNAME="$1"
+      shift
+      ;;
+    -h|--help)
+      usage
+      ;;
+    -*)
+      echo "ERROR: Unknown option: $1" >&2
+      usage
+      ;;
+    *)
+      if [[ -z "${USERNAME}" ]]; then
+        USERNAME="$1"
+        shift
+      else
+        echo "ERROR: Unexpected extra argument: $1" >&2
+        usage
+      fi
+      ;;
+  esac
+done
 
 show_banner() {
   local CYAN='\033[0;36m'
@@ -26,23 +75,30 @@ EOF
 clear
 show_banner
 
-read -erp "please input username: " USERNAME
-
 if [[ -z "${USERNAME}" ]]; then
-  echo "ERROR: Username cannot be empty."
-  exit 1
+  read -erp "please input username: " USERNAME
+  if [[ -z "${USERNAME}" ]]; then
+    echo "ERROR: Username cannot be empty."
+    exit 1
+  fi
 fi
 
 clear
 show_banner
 
-echo "Searching for backups matching: ${BACKUP_BASE}/*${USERNAME}*"
+if [[ -n "${SERVER_FILTER}" ]]; then
+  echo "Searching for backups matching: /home/${SERVER_FILTER}/weekly*/*${USERNAME}*"
+  SEARCH_PATTERN="/home/${SERVER_FILTER}/weekly*"
+else
+  echo "Searching for backups matching: ${BACKUP_BASE}/*${USERNAME}*"
+  SEARCH_PATTERN="/home/*/weekly*"
+fi
 SEARCH_START=$(date +%s%N)
 
 declare -A SERVER_SET
 shopt -s nullglob extglob
 mapfile -t BACKUP_FILES < <(
-  for weekly_dir in /home/*/weekly*; do
+  for weekly_dir in ${SEARCH_PATTERN}; do
     [[ -d "${weekly_dir}" ]] || continue
     find "${weekly_dir}" -maxdepth 1 -type f -name "*${USERNAME}*" -printf '%T@\t%p\n' 2>/dev/null
   done | sort -rn | cut -f2-
