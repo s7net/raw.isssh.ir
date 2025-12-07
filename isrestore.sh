@@ -39,12 +39,12 @@ show_banner() {
   
   echo -e "${BRIGHT_GREEN}"
   cat <<'EOF'
-    _      __________ __  __       _____           _       __      
-   (_)____/ ___/ ___// / / /      / ___/__________(_)___  / /______
-  / / ___/\__ \\__ \/ /_/ /       \__ \/ ___/ ___/ / __ \/ __/ ___/
- / (__  )___/ /__/ / __  /       ___/ / /__/ /  / / /_/ / /_(__  ) 
-/_/____//____/____/_/ /_/       /____/\___/_/  /_/ .___/\__/____/  
-                                                /_/               
+    _         ____            __                 /\//\//
+   (_)____   / __ \___  _____/ /_____  ________ //\//\/ 
+  / / ___/  / /_/ / _ \/ ___/ __/ __ \/ ___/ _ \        
+ / (__  )  / _, _/  __(__  ) /_/ /_/ / /  /  __/        
+/_/____/  /_/ |_|\___/____/\__/\____/_/   \___/         
+                                                        
 EOF
   echo -e "${RESET}"
   echo
@@ -179,8 +179,7 @@ download_backup_parallel() {
   done
   
   for i in "${!pids[@]}"; do
-    wait "${pids[$i]}"
-    if [[ $? -eq 0 ]]; then
+    if wait "${pids[$i]}"; then
       log "✓ Downloaded: $(basename "${dests[$i]}")"
     else
       log "ERROR: Failed to download: $(basename "${dests[$i]}")"
@@ -275,8 +274,10 @@ get_login_url() {
   
   # Fallback to older --create-login-url syntax
   if url="$(${DA_BIN} --create-login-url "user=${owner}" 2>/dev/null | grep -Eo 'https?://[^ ]+' | head -n1)"; then
-    [[ -n "${url}" ]] && echo "${url}"
+    [[ -n "${url}" ]] && echo "${url}" && return 0
   fi
+
+  return 1
 }
 
 check_disk_space() {
@@ -322,10 +323,13 @@ setup_restore_workdir() {
 
 extract_domain_from_backup() {
   local backup_path="$1"
-  local backup_filename="$(basename "${backup_path}")"
-  local backup_abs_path="$(readlink -f "${backup_path}" 2>/dev/null || echo "${backup_path}")"
+  local backup_filename
+  backup_filename="$(basename "${backup_path}")"
+  local backup_abs_path
+  backup_abs_path="$(readlink -f "${backup_path}" 2>/dev/null || echo "${backup_path}")"
   local username=""
-  local random_str="$(openssl rand -hex 8 2>/dev/null || date +%s | sha256sum | cut -c1-16)"
+  local random_str
+  random_str="$(openssl rand -hex 8 2>/dev/null || date +%s | sha256sum | cut -c1-16)"
   local temp_dir=""
   local user_conf=""
   local domain=""
@@ -364,13 +368,13 @@ extract_domain_from_backup() {
   if [[ "${backup_path}" == *.zst ]]; then
     if ! command -v zstd >/dev/null 2>&1; then
       log "WARNING: zstd not found. Cannot extract domain from .zst backup."
-      rm -rf "${temp_dir}" 2>/dev/null
+      rm -rf "${temp_dir}" 2>/dev/null || true
       return 1
     fi
-    cd "${temp_dir}" || { log "ERROR: Failed to change to temp directory ${temp_dir}"; return 1; }
-    EXTRACT_OUTPUT=$(tar -I zstd -xf "${backup_abs_path}" backup/user.conf 2>&1)
+    cd "${temp_dir}" || { log "ERROR: Failed to change to temp directory ${temp_dir}"; rm -rf "${temp_dir}" 2>/dev/null || true; return 1; }
+    EXTRACT_OUTPUT=$(tar -I zstd -xf "${backup_abs_path}" backup/user.conf 2>&1 || true)
     EXTRACT_EXIT=$?
-    cd - >/dev/null 2>&1
+    cd - >/dev/null 2>&1 || true
     echo "${EXTRACT_OUTPUT}" >> "${RAW_LOG}"
     
     if [[ ${EXTRACT_EXIT} -eq 0 ]]; then
@@ -383,10 +387,10 @@ extract_domain_from_backup() {
       log "ERROR: Failed to extract backup/user.conf from .zst archive (exit code: ${EXTRACT_EXIT})"
     fi
   elif [[ "${backup_path}" == *.tar.gz ]] || [[ "${backup_path}" == *.tgz ]]; then
-    cd "${temp_dir}" || { log "ERROR: Failed to change to temp directory ${temp_dir}"; return 1; }
-    EXTRACT_OUTPUT=$(tar -xzf "${backup_abs_path}" backup/user.conf 2>&1)
+    cd "${temp_dir}" || { log "ERROR: Failed to change to temp directory ${temp_dir}"; rm -rf "${temp_dir}" 2>/dev/null || true; return 1; }
+    EXTRACT_OUTPUT=$(tar -xzf "${backup_abs_path}" backup/user.conf 2>&1 || true)
     EXTRACT_EXIT=$?
-    cd - >/dev/null 2>&1
+    cd - >/dev/null 2>&1 || true
     echo "${EXTRACT_OUTPUT}" >> "${RAW_LOG}"
     
     if [[ ${EXTRACT_EXIT} -eq 0 ]]; then
@@ -399,10 +403,10 @@ extract_domain_from_backup() {
       log "ERROR: Failed to extract backup/user.conf from .tar.gz archive (exit code: ${EXTRACT_EXIT})"
     fi
   elif [[ "${backup_path}" == *.tar ]]; then
-    cd "${temp_dir}" || { log "ERROR: Failed to change to temp directory ${temp_dir}"; return 1; }
-    EXTRACT_OUTPUT=$(tar -xf "${backup_abs_path}" backup/user.conf 2>&1)
+    cd "${temp_dir}" || { log "ERROR: Failed to change to temp directory ${temp_dir}"; rm -rf "${temp_dir}" 2>/dev/null || true; return 1; }
+    EXTRACT_OUTPUT=$(tar -xf "${backup_abs_path}" backup/user.conf 2>&1 || true)
     EXTRACT_EXIT=$?
-    cd - >/dev/null 2>&1
+    cd - >/dev/null 2>&1 || true
     echo "${EXTRACT_OUTPUT}" >> "${RAW_LOG}"
     
     if [[ ${EXTRACT_EXIT} -eq 0 ]]; then
@@ -422,10 +426,12 @@ extract_domain_from_backup() {
     log_verbose "  Domain extracted successfully: ${domain}"
     log_verbose "  Temporary directory: ${temp_dir}"
     echo "${domain}" >&1
+    rm -rf "${temp_dir}" 2>/dev/null || true
     return 0
   else
     log_verbose "  Failed to extract domain. Temporary directory: ${temp_dir}"
     log_verbose "  You can manually check: ${user_conf}"
+    rm -rf "${temp_dir}" 2>/dev/null || true
     return 1
   fi
 }
@@ -457,6 +463,7 @@ rename_backup_for_existing_user() {
   local backup_dir
   local backup_name
   local new_backup_path
+  local new_backup_name
   
   backup_dir="$(dirname "${backup_path}")"
   backup_name="$(basename "${backup_path}")"
@@ -472,11 +479,12 @@ rename_backup_for_existing_user() {
     else
       log "WARNING: Failed to rename backup file. Continuing with original name."
       echo "${backup_path}"
-      return 1
+      return 0
     fi
   fi
   
   echo "${backup_path}"
+  return 0
 }
 
 replace_old_username_references() {
@@ -634,7 +642,7 @@ log_verbose "  Dir  : ${LOCAL_PATH}"
 log_verbose "  Name : ${FILE_NAME}"
 
 # Detect server IP
-SERVER_IP="${SERVER_IP:-$(detect_server_ip)}"
+SERVER_IP="${SERVER_IP:-$(detect_server_ip || echo "")}"
 [[ -z "${SERVER_IP}" ]] && {
   log "ERROR: Could not detect server IP automatically."
   log "       You can set it manually, e.g.:"
@@ -647,17 +655,15 @@ log_verbose "Using server IP for restore: ${SERVER_IP}"
 check_disk_space "${BACKUP_PATH}"
 
 # Check if domain from backup already exists on server
-# We extract backup/user.conf to get the domain name, which tells us if we should
-# restore to an existing user (if domain already exists) or create a new user
 log "Checking domain from backup..."
-BACKUP_DOMAIN="$(extract_domain_from_backup "${BACKUP_PATH}")"
+BACKUP_DOMAIN="$(extract_domain_from_backup "${BACKUP_PATH}" || echo "")"
 ORIGINAL_USERNAME=""
 EXISTING_USER=""
 USER_EXISTED_BEFORE_RESTORE=0
 
 if [[ -n "${BACKUP_DOMAIN}" ]]; then
   log_verbose "Extracted domain from backup: ${BACKUP_DOMAIN}"
-  EXISTING_USER="$(check_domain_exists "${BACKUP_DOMAIN}")"
+  EXISTING_USER="$(check_domain_exists "${BACKUP_DOMAIN}" || echo "")"
   
   if [[ -n "${EXISTING_USER}" ]]; then
     USER_EXISTED_BEFORE_RESTORE=1
@@ -672,7 +678,7 @@ if [[ -n "${BACKUP_DOMAIN}" ]]; then
     
     # Save current password hash before restore
     log_verbose "Saving current password hash for user ${EXISTING_USER}..."
-    SAVED_PASSWORD_HASH="$(save_password_hash "${EXISTING_USER}")"
+    SAVED_PASSWORD_HASH="$(save_password_hash "${EXISTING_USER}" || echo "")"
     if [[ -n "${SAVED_PASSWORD_HASH}" ]]; then
       log_verbose "✓ Password hash saved (will be restored after backup restore)"
     else
@@ -682,7 +688,7 @@ if [[ -n "${BACKUP_DOMAIN}" ]]; then
     # Check existing user's directory size
     USER_HOME="/home/${EXISTING_USER}"
     if [[ -d "${USER_HOME}" ]]; then
-      DIR_SIZE=$(get_directory_size "${USER_HOME}")
+      DIR_SIZE=$(get_directory_size "${USER_HOME}" || echo 0)
       DIR_SIZE_MB=$((DIR_SIZE / 1024 / 1024))
       SIZE_THRESHOLD_MB=10
       
@@ -725,7 +731,7 @@ if [[ -n "${USERNAME}" ]]; then
     
     # Save current password hash before restore
     log_verbose "Saving current password hash for user ${USERNAME}..."
-    SAVED_PASSWORD_HASH="$(save_password_hash "${USERNAME}")"
+    SAVED_PASSWORD_HASH="$(save_password_hash "${USERNAME}" || echo "")"
     if [[ -n "${SAVED_PASSWORD_HASH}" ]]; then
       log_verbose "✓ Password hash saved (will be restored after backup restore)"
     else
@@ -735,7 +741,7 @@ if [[ -n "${USERNAME}" ]]; then
     # Check existing user's directory size
     USER_HOME="/home/${USERNAME}"
     if [[ -d "${USER_HOME}" ]]; then
-      DIR_SIZE=$(get_directory_size "${USER_HOME}")
+      DIR_SIZE=$(get_directory_size "${USER_HOME}" || echo 0)
       DIR_SIZE_MB=$((DIR_SIZE / 1024 / 1024))
       SIZE_THRESHOLD_MB=10
       
@@ -766,15 +772,15 @@ if [[ -n "${USERNAME}" ]]; then
       log_verbose "Detected username from backup filename: ${USERNAME} (EXISTS on this server)"
       echo
       read -erp "User ${USERNAME} already exists. Continue and restore over this existing user from backup? [y/N]: " CONFIRM
-    case "${CONFIRM}" in
-      [yY]|[yY][eE][sS])
+      case "${CONFIRM}" in
+        [yY]|[yY][eE][sS])
           log_verbose "User chose to continue restore and overwrite existing user ${USERNAME}."
-        ;;
-      *)
-        log "User ${USERNAME} exists and restore was NOT confirmed. Aborting restore."
-        exit 0
-        ;;
-    esac
+          ;;
+        *)
+          log "User ${USERNAME} exists and restore was NOT confirmed. Aborting restore."
+          exit 0
+          ;;
+      esac
     fi
   else
     log_verbose "Detected username from backup filename: ${USERNAME} (does NOT exist yet)"
@@ -796,7 +802,7 @@ SUCCESS_LINE=""
 # Print GUI URLs
 FQDN_HOST="$(hostname -f 2>/dev/null || echo "${HOST_SHORT}")"
 DA_PORT="$(detect_da_port)"
-LOGIN_URL="$(get_login_url "${OWNER}")"
+LOGIN_URL="$(get_login_url "${OWNER}" || echo "")"
 
 if [[ -n "${LOGIN_URL}" ]]; then
   log "Login URL: ${LOGIN_URL}"
@@ -829,7 +835,7 @@ if [[ -f "${SYSTEM_LOG}" ]]; then
       FILTERED_LINES="$(echo "${NEW_SYS_LINES}" | grep -i "${USERNAME}" || true)"
       SUCCESS_LINE="$(echo "${FILTERED_LINES}" | grep -i "has been restored from" | tail -n 1 || true)"
 
-    if [[ -n "${SUCCESS_LINE}" ]]; then
+      if [[ -n "${SUCCESS_LINE}" ]]; then
         log "✓ Restore successful: ${SUCCESS_LINE}"
       else
         log "⚠️  No explicit success message found for user ${USERNAME}"
@@ -875,7 +881,7 @@ if [[ -n "${USERNAME}" ]] && [[ -n "${SUCCESS_LINE}" ]] && [[ ${USER_EXISTED_BEF
   NEW_PASSWORD="$(generate_password)"
   
   if "${DA_BIN}" --set-password "user=${USERNAME}" "password=${NEW_PASSWORD}" >> "${RAW_LOG}" 2>&1; then
-    USER_LOGIN_URL="$(get_login_url "${USERNAME}")"
+    USER_LOGIN_URL="$(get_login_url "${USERNAME}" || echo "")"
     FQDN_HOST="$(hostname -f 2>/dev/null || echo "${HOST_SHORT}")"
     DA_PORT="$(detect_da_port)"
     
@@ -902,13 +908,13 @@ fi
 
 # Restore original password hash if user existed before restore
 if [[ ${USER_EXISTED_BEFORE_RESTORE} -eq 1 ]] && [[ -n "${USERNAME}" ]] && [[ -n "${SUCCESS_LINE}" ]] && [[ -n "${SAVED_PASSWORD_HASH}" ]]; then
-  restore_password_hash "${USERNAME}" "${SAVED_PASSWORD_HASH}"
+  restore_password_hash "${USERNAME}" "${SAVED_PASSWORD_HASH}" || true
 fi
 
 # Replace old username references if restored to existing user
 if [[ -n "${ORIGINAL_USERNAME}" ]] && [[ -n "${USERNAME}" ]] && [[ "${ORIGINAL_USERNAME}" != "${USERNAME}" ]] && [[ -n "${SUCCESS_LINE}" ]]; then
   log "Restore completed to existing user ${USERNAME} (original backup was for ${ORIGINAL_USERNAME})"
-  replace_old_username_references "${USERNAME}" "${ORIGINAL_USERNAME}"
+  replace_old_username_references "${USERNAME}" "${ORIGINAL_USERNAME}" || true
 fi
 
 # Restore original backup filename if it was renamed
