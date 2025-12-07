@@ -137,23 +137,29 @@ generate_password() {
 download_backup() {
   local url="$1"
   local dest="$2"
-  
+
   log "Downloading: ${url}"
-  
+
   if command -v wget >/dev/null 2>&1; then
-    if wget --progress=bar:force -O "${dest}" "${url}" >> "${RAW_LOG}" 2>&1; then
+    wget --progress=bar:force -O "${dest}" "${url}" 2>&1 \
+      | tee -a "${RAW_LOG}"
+    if [[ ${PIPESTATUS[0]} -eq 0 ]]; then
       log "✓ Download completed"
     else
       log "ERROR: Download failed"
       exit 1
     fi
+
   elif command -v curl >/dev/null 2>&1; then
-    if curl -L --progress-bar -o "${dest}" "${url}" >> "${RAW_LOG}" 2>&1; then
+    curl -L --progress-bar -o "${dest}" "${url}" 2>&1 \
+      | tee -a "${RAW_LOG}"
+    if [[ ${PIPESTATUS[0]} -eq 0 ]]; then
       log "✓ Download completed"
     else
       log "ERROR: Download failed"
       exit 1
     fi
+
   else
     log "ERROR: Neither wget nor curl is available. Please install one of them."
     exit 1
@@ -164,21 +170,22 @@ download_backup_parallel() {
   local urls=("$@")
   local pids=()
   local dests=()
-  
+
   log "Downloading ${#urls[@]} file(s) in parallel..."
-  
+
   for url in "${urls[@]}"; do
     local dest="${DEFAULT_DOWNLOAD_DIR}/$(basename "${url}")"
     dests+=("${dest}")
-    
+
     if command -v wget >/dev/null 2>&1; then
       wget --progress=bar:force -O "${dest}" "${url}" >> "${RAW_LOG}" 2>&1 &
     elif command -v curl >/dev/null 2>&1; then
       curl -L --progress-bar -o "${dest}" "${url}" >> "${RAW_LOG}" 2>&1 &
     fi
+
     pids+=($!)
   done
-  
+
   for i in "${!pids[@]}"; do
     if wait "${pids[$i]}"; then
       log "✓ Downloaded: $(basename "${dests[$i]}")"
