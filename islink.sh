@@ -3,12 +3,9 @@
 set -uo pipefail
 
 show_banner() {
-  local CYAN='\033[0;36m'
-  local BRIGHT_CYAN='\033[1;36m'
-  local BLUE='\033[0;34m'
+  local ORANGE='\033[38;5;208m'
   local RESET='\033[0m'
-  
-  echo -e "${BRIGHT_CYAN}"
+  echo -e "${ORANGE}"
   cat <<'EOF'
  __       _______.    __       __  .__   __.  __     ___              
 |  |     /       |   |  |     |  | |  \ |  | |  |   /  /              
@@ -16,10 +13,14 @@ show_banner() {
 |  |     \   \       |  |     |  | |  . `  | |  | <  < |______|______|
 |  | .----)   |      |  `----.|  | |  |\   | |  |  \  \               
 |__| |_______/       |_______||__| |__| \__| |  |   \__\              
-                                             |__|                                                                                       
+                                             |__|                       
 EOF
   echo -e "${RESET}"
   echo
+}
+
+run_no_lve_banner() {
+  "$@" 2> >(grep -v 'LVE' | grep -v 'cloudlinux.com' >&2)
 }
 
 clear
@@ -48,18 +49,12 @@ if [[ -d "${src}" ]]; then
       ZIP_NAME="$(basename -- "${src}").zip"
       ZIP_PATH="/tmp/${ZIP_NAME}"
       echo "Creating zip file: ${ZIP_PATH}"
-      
-      if command -v zip >/dev/null 2>&1; then
-        if zip -r "${ZIP_PATH}" "${src}" >/dev/null 2>&1; then
-          src="${ZIP_PATH}"
-          echo "✓ Zip file created: ${ZIP_PATH}"
-        else
-          echo "ERROR: Failed to create zip file."
-          exit 4
-        fi
+      if zip -r "${ZIP_PATH}" "${src}" >/dev/null 2>&1; then
+        src="${ZIP_PATH}"
+        echo "✓ Zip file created: ${ZIP_PATH}"
       else
-        echo "ERROR: zip command not found. Please install zip."
-        exit 5
+        echo "ERROR: Failed to create zip file."
+        exit 4
       fi
       ;;
     *)
@@ -75,38 +70,25 @@ base="$(basename -- "${src}")"
 
 echo "Copying file to web directory..."
 
-FILE_SIZE=$(stat -c%s "${src}" 2>/dev/null || stat -f%z "${src}" 2>/dev/null || echo 0)
-
-if command -v pv >/dev/null 2>&1 && [[ ${FILE_SIZE} -gt 0 ]]; then
-  if pv "${src}" | sudo tee "${dst}/${base}" >/dev/null; then
-    COPY_SUCCESS=1
-  else
-    COPY_SUCCESS=0
-  fi
-elif command -v rsync >/dev/null 2>&1; then
-  if sudo rsync --whole-file --inplace --no-compress --info=progress2 "${src}" "${dst}/${base}"; then
+if command -v rsync >/dev/null 2>&1; then
+  if run_no_lve_banner sudo rsync --whole-file --inplace --no-compress --info=progress2 "${src}" "${dst}/${base}"; then
     COPY_SUCCESS=1
   else
     COPY_SUCCESS=0
   fi
 else
-  if sudo cp -a -- "${src}" "${dst}/${base}"; then
-    COPY_SUCCESS=1
-  else
-    COPY_SUCCESS=0
-  fi
+  echo "ERROR: rsync command not found."
+  exit 9
 fi
 
 if [[ ${COPY_SUCCESS} -eq 1 ]]; then
-  sudo chown root:root -- "${dst}/${base}" && \
-  sudo chmod 644 -- "${dst}/${base}" && \
+  sudo chown root:root -- "${dst}/${base}"
+  sudo chmod 644 -- "${dst}/${base}"
   echo
   echo "✓ Done: ${dst}/${base} (owner root:root, mode 644)"
   echo
   echo "📥 Download URL (hostname): http://${host}/${base}"
-  if [[ -n "${public_ip}" ]]; then
-    echo "📥 Download URL (public IP): http://${public_ip}/${base}"
-  fi
+  [[ -n "${public_ip}" ]] && echo "📥 Download URL (public IP): http://${public_ip}/${base}"
 else
   echo "ERROR: Failed to copy file to ${dst}/${base}"
   exit 3
