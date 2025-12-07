@@ -76,7 +76,7 @@ clear
 show_banner
 
 if [[ -z "${USERNAME}" ]]; then
-  read -erp "please input username: " USERNAME
+  read -erp "please input username or ( domain only for wh*** hosts ) : " USERNAME
   if [[ -z "${USERNAME}" ]]; then
     echo "ERROR: Username cannot be empty."
     exit 1
