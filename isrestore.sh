@@ -26,6 +26,7 @@ ERROR_LOG="/var/log/directadmin/errortaskq.log"
 RAW_LOG="/tmp/da_restore_last.log"
 RESTORE_LOG_DIR=""
 RESTORE_LOG=""
+SAVED_PASSWORD_HASH=""
 
 # ============================================================================
 # Functions
@@ -207,6 +208,49 @@ get_directory_size() {
     du -sb "${dir}" 2>/dev/null | awk '{print $1}'
   else
     find "${dir}" -type f -exec stat -c%s {} \; 2>/dev/null | awk '{sum+=$1} END {print sum+0}'
+  fi
+}
+
+save_password_hash() {
+  local username="$1"
+  local shadow_file="/etc/shadow"
+  local hash=""
+  
+  if [[ ! -r "${shadow_file}" ]]; then
+    log_verbose "WARNING: Cannot read ${shadow_file} to save password hash for user ${username}"
+    return 1
+  fi
+  
+  if hash=$(grep "^${username}:" "${shadow_file}" 2>/dev/null | cut -d':' -f2); then
+    if [[ -n "${hash}" ]] && [[ "${hash}" != "*" ]] && [[ "${hash}" != "!" ]] && [[ "${hash}" != "!!" ]]; then
+      echo "${hash}"
+      return 0
+    fi
+  fi
+  
+  return 1
+}
+
+restore_password_hash() {
+  local username="$1"
+  local hash="$2"
+  
+  if [[ -z "${username}" ]] || [[ -z "${hash}" ]]; then
+    log "WARNING: Cannot restore password hash: missing username or hash"
+    return 1
+  fi
+  
+  log "Restoring original password for user ${username}..."
+  
+  if echo "${username}:${hash}" | chpasswd -e 2>/dev/null; then
+    log "✓ Original password restored for user ${username}"
+    return 0
+  elif usermod -p "${hash}" "${username}" 2>/dev/null; then
+    log "✓ Original password restored for user ${username}"
+    return 0
+  else
+    log "WARNING: Failed to restore original password for user ${username}"
+    return 1
   fi
 }
 
@@ -626,6 +670,15 @@ if [[ -n "${BACKUP_DOMAIN}" ]]; then
       log_warning "⚠️  Restore will be performed on existing user '${EXISTING_USER}'"
     fi
     
+    # Save current password hash before restore
+    log_verbose "Saving current password hash for user ${EXISTING_USER}..."
+    SAVED_PASSWORD_HASH="$(save_password_hash "${EXISTING_USER}")"
+    if [[ -n "${SAVED_PASSWORD_HASH}" ]]; then
+      log_verbose "✓ Password hash saved (will be restored after backup restore)"
+    else
+      log_verbose "WARNING: Could not save password hash for user ${EXISTING_USER}"
+    fi
+    
     # Check existing user's directory size
     USER_HOME="/home/${EXISTING_USER}"
     if [[ -d "${USER_HOME}" ]]; then
@@ -669,6 +722,15 @@ if [[ -n "${USERNAME}" ]]; then
   USER_DIR="/usr/local/directadmin/data/users/${USERNAME}"
   if [[ -d "${USER_DIR}" ]] && [[ ${USER_EXISTED_BEFORE_RESTORE} -eq 0 ]]; then
     USER_EXISTED_BEFORE_RESTORE=1
+    
+    # Save current password hash before restore
+    log_verbose "Saving current password hash for user ${USERNAME}..."
+    SAVED_PASSWORD_HASH="$(save_password_hash "${USERNAME}")"
+    if [[ -n "${SAVED_PASSWORD_HASH}" ]]; then
+      log_verbose "✓ Password hash saved (will be restored after backup restore)"
+    else
+      log_verbose "WARNING: Could not save password hash for user ${USERNAME}"
+    fi
     
     # Check existing user's directory size
     USER_HOME="/home/${USERNAME}"
@@ -836,6 +898,11 @@ elif [[ -n "${USERNAME}" ]] && [[ ${USER_EXISTED_BEFORE_RESTORE} -eq 1 ]] && [[ 
   log_verbose "Skipping password reset: User ${USERNAME} existed before restore (password preserved)."
 elif [[ -n "${USERNAME}" ]] && [[ -z "${SUCCESS_LINE}" ]]; then
   log_verbose "Skipping password reset: No successful restore detected for user ${USERNAME}."
+fi
+
+# Restore original password hash if user existed before restore
+if [[ ${USER_EXISTED_BEFORE_RESTORE} -eq 1 ]] && [[ -n "${USERNAME}" ]] && [[ -n "${SUCCESS_LINE}" ]] && [[ -n "${SAVED_PASSWORD_HASH}" ]]; then
+  restore_password_hash "${USERNAME}" "${SAVED_PASSWORD_HASH}"
 fi
 
 # Replace old username references if restored to existing user
