@@ -213,6 +213,18 @@ extract_domain_from_backup() {
   
   log "Extracting domain from backup (reading backup/user.conf)..."
   log "  Temporary directory: ${temp_dir}"
+  log "  Backup file: ${backup_path}"
+  
+  if [[ ! -f "${backup_path}" ]]; then
+    log "ERROR: Backup file does not exist: ${backup_path}"
+    return 1
+  fi
+  
+  if [[ ! -r "${backup_path}" ]]; then
+    log "ERROR: Backup file is not readable: ${backup_path}"
+    return 1
+  fi
+  
   mkdir -p "${temp_dir}"
   
   if [[ "${backup_path}" == *.zst ]]; then
@@ -221,40 +233,73 @@ extract_domain_from_backup() {
       rm -rf "${temp_dir}" 2>/dev/null
       return 1
     fi
-    if tar -I zstd -xf "${backup_path}" backup/user.conf -C "${temp_dir}" >> "${RAW_LOG}" 2>&1; then
+    log "  Extracting with: tar -I zstd -xf ${backup_path} backup/user.conf -C ${temp_dir}"
+    EXTRACT_OUTPUT=$(tar -I zstd -xf "${backup_path}" backup/user.conf -C "${temp_dir}" 2>&1)
+    EXTRACT_EXIT=$?
+    echo "${EXTRACT_OUTPUT}" >> "${RAW_LOG}"
+    
+    if [[ ${EXTRACT_EXIT} -eq 0 ]]; then
       if [[ -f "${user_conf}" ]]; then
         log "Checking user.conf file: ${user_conf}"
         domain=$(grep -E '^domain=' "${user_conf}" 2>/dev/null | cut -d'=' -f2 | tr -d ' ' | head -n1)
-        log "Successfully extracted and read user.conf from backup"
+        if [[ -n "${domain}" ]]; then
+          log "Successfully extracted and read domain from user.conf: ${domain}"
+        else
+          log "WARNING: Domain not found in user.conf file"
+        fi
       else
-        log "WARNING: backup/user.conf not found in archive"
+        log "WARNING: backup/user.conf not found in archive after extraction"
+        [[ -n "${EXTRACT_OUTPUT}" ]] && log "  Extraction output: ${EXTRACT_OUTPUT}"
       fi
     else
-      log "WARNING: Failed to extract backup/user.conf from .zst archive"
+      log "ERROR: Failed to extract backup/user.conf from .zst archive (exit code: ${EXTRACT_EXIT})"
+      [[ -n "${EXTRACT_OUTPUT}" ]] && log "  Error output: ${EXTRACT_OUTPUT}"
     fi
   elif [[ "${backup_path}" == *.tar.gz ]] || [[ "${backup_path}" == *.tgz ]]; then
-    if tar -xzf "${backup_path}" backup/user.conf -C "${temp_dir}" >> "${RAW_LOG}" 2>&1; then
+    log "  Extracting with: tar -xzf ${backup_path} backup/user.conf -C ${temp_dir}"
+    EXTRACT_OUTPUT=$(tar -xzf "${backup_path}" backup/user.conf -C "${temp_dir}" 2>&1)
+    EXTRACT_EXIT=$?
+    echo "${EXTRACT_OUTPUT}" >> "${RAW_LOG}"
+    
+    if [[ ${EXTRACT_EXIT} -eq 0 ]]; then
       if [[ -f "${user_conf}" ]]; then
         log "Checking user.conf file: ${user_conf}"
         domain=$(grep -E '^domain=' "${user_conf}" 2>/dev/null | cut -d'=' -f2 | tr -d ' ' | head -n1)
-        log "Successfully extracted and read user.conf from backup"
+        if [[ -n "${domain}" ]]; then
+          log "Successfully extracted and read domain from user.conf: ${domain}"
+        else
+          log "WARNING: Domain not found in user.conf file"
+        fi
       else
-        log "WARNING: backup/user.conf not found in archive"
+        log "WARNING: backup/user.conf not found in archive after extraction"
+        [[ -n "${EXTRACT_OUTPUT}" ]] && log "  Extraction output: ${EXTRACT_OUTPUT}"
       fi
     else
-      log "WARNING: Failed to extract backup/user.conf from .tar.gz archive"
+      log "ERROR: Failed to extract backup/user.conf from .tar.gz archive (exit code: ${EXTRACT_EXIT})"
+      [[ -n "${EXTRACT_OUTPUT}" ]] && log "  Error output: ${EXTRACT_OUTPUT}"
     fi
   elif [[ "${backup_path}" == *.tar ]]; then
-    if tar -xf "${backup_path}" backup/user.conf -C "${temp_dir}" >> "${RAW_LOG}" 2>&1; then
+    log "  Extracting with: tar -xf ${backup_path} backup/user.conf -C ${temp_dir}"
+    EXTRACT_OUTPUT=$(tar -xf "${backup_path}" backup/user.conf -C "${temp_dir}" 2>&1)
+    EXTRACT_EXIT=$?
+    echo "${EXTRACT_OUTPUT}" >> "${RAW_LOG}"
+    
+    if [[ ${EXTRACT_EXIT} -eq 0 ]]; then
       if [[ -f "${user_conf}" ]]; then
         log "Checking user.conf file: ${user_conf}"
         domain=$(grep -E '^domain=' "${user_conf}" 2>/dev/null | cut -d'=' -f2 | tr -d ' ' | head -n1)
-        log "Successfully extracted and read user.conf from backup"
+        if [[ -n "${domain}" ]]; then
+          log "Successfully extracted and read domain from user.conf: ${domain}"
+        else
+          log "WARNING: Domain not found in user.conf file"
+        fi
       else
-        log "WARNING: backup/user.conf not found in archive"
+        log "WARNING: backup/user.conf not found in archive after extraction"
+        [[ -n "${EXTRACT_OUTPUT}" ]] && log "  Extraction output: ${EXTRACT_OUTPUT}"
       fi
     else
-      log "WARNING: Failed to extract backup/user.conf from .tar archive"
+      log "ERROR: Failed to extract backup/user.conf from .tar archive (exit code: ${EXTRACT_EXIT})"
+      [[ -n "${EXTRACT_OUTPUT}" ]] && log "  Error output: ${EXTRACT_OUTPUT}"
     fi
   else
     log "WARNING: Unknown backup format. Cannot extract domain."
