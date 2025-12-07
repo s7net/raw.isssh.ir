@@ -196,35 +196,78 @@ setup_restore_workdir() {
 
 extract_domain_from_backup() {
   local backup_path="$1"
-  local temp_dir="/tmp/da_check_$$"
-  local user_conf="${temp_dir}/backup/user.conf"
+  local backup_filename="$(basename "${backup_path}")"
+  local username=""
+  local random_str="$(openssl rand -hex 8 2>/dev/null || date +%s | sha256sum | cut -c1-16)"
+  local temp_dir=""
+  local user_conf=""
   local domain=""
   
+  username="$(parse_username_from_filename "${backup_filename}")"
+  if [[ -z "${username}" ]]; then
+    username="unknown"
+  fi
+  
+  temp_dir="/tmp/${username}_${random_str}"
+  user_conf="${temp_dir}/backup/user.conf"
+  
+  log "Extracting domain from backup (reading backup/user.conf)..."
+  log "  Temporary directory: ${temp_dir}"
   mkdir -p "${temp_dir}"
   
   if [[ "${backup_path}" == *.zst ]]; then
-    if tar -I zstd -xf "${backup_path}" backup/user.conf -C "${temp_dir}" 2>/dev/null; then
+    if ! command -v zstd >/dev/null 2>&1; then
+      log "WARNING: zstd not found. Cannot extract domain from .zst backup."
+      rm -rf "${temp_dir}" 2>/dev/null
+      return 1
+    fi
+    if tar -I zstd -xf "${backup_path}" backup/user.conf -C "${temp_dir}" >> "${RAW_LOG}" 2>&1; then
       if [[ -f "${user_conf}" ]]; then
+        log "Checking user.conf file: ${user_conf}"
         domain=$(grep -E '^domain=' "${user_conf}" 2>/dev/null | cut -d'=' -f2 | tr -d ' ' | head -n1)
+        log "Successfully extracted and read user.conf from backup"
+      else
+        log "WARNING: backup/user.conf not found in archive"
       fi
+    else
+      log "WARNING: Failed to extract backup/user.conf from .zst archive"
     fi
   elif [[ "${backup_path}" == *.tar.gz ]] || [[ "${backup_path}" == *.tgz ]]; then
-    if tar -xzf "${backup_path}" backup/user.conf -C "${temp_dir}" 2>/dev/null; then
+    if tar -xzf "${backup_path}" backup/user.conf -C "${temp_dir}" >> "${RAW_LOG}" 2>&1; then
       if [[ -f "${user_conf}" ]]; then
+        log "Checking user.conf file: ${user_conf}"
         domain=$(grep -E '^domain=' "${user_conf}" 2>/dev/null | cut -d'=' -f2 | tr -d ' ' | head -n1)
+        log "Successfully extracted and read user.conf from backup"
+      else
+        log "WARNING: backup/user.conf not found in archive"
       fi
+    else
+      log "WARNING: Failed to extract backup/user.conf from .tar.gz archive"
     fi
   elif [[ "${backup_path}" == *.tar ]]; then
-    if tar -xf "${backup_path}" backup/user.conf -C "${temp_dir}" 2>/dev/null; then
+    if tar -xf "${backup_path}" backup/user.conf -C "${temp_dir}" >> "${RAW_LOG}" 2>&1; then
       if [[ -f "${user_conf}" ]]; then
+        log "Checking user.conf file: ${user_conf}"
         domain=$(grep -E '^domain=' "${user_conf}" 2>/dev/null | cut -d'=' -f2 | tr -d ' ' | head -n1)
+        log "Successfully extracted and read user.conf from backup"
+      else
+        log "WARNING: backup/user.conf not found in archive"
       fi
+    else
+      log "WARNING: Failed to extract backup/user.conf from .tar archive"
     fi
+  else
+    log "WARNING: Unknown backup format. Cannot extract domain."
   fi
   
   rm -rf "${temp_dir}" 2>/dev/null
   
-  [[ -n "${domain}" ]] && echo "${domain}"
+  if [[ -n "${domain}" ]]; then
+    echo "${domain}"
+    return 0
+  else
+    return 1
+  fi
 }
 
 check_domain_exists() {
@@ -404,7 +447,10 @@ log "Using server IP for restore: ${SERVER_IP}"
 check_disk_space "${BACKUP_PATH}"
 
 # Check if domain from backup already exists on server
+# We extract backup/user.conf to get the domain name, which tells us if we should
+# restore to an existing user (if domain already exists) or create a new user
 log "Checking if domain from backup already exists on server..."
+log "  (Extracting backup/user.conf to read domain name...)"
 BACKUP_DOMAIN="$(extract_domain_from_backup "${BACKUP_PATH}")"
 ORIGINAL_USERNAME=""
 EXISTING_USER=""
