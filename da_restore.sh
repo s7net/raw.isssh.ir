@@ -24,25 +24,53 @@ DEFAULT_DOWNLOAD_DIR="/home/admin"
 SYSTEM_LOG="/var/log/directadmin/system.log"
 ERROR_LOG="/var/log/directadmin/errortaskq.log"
 RAW_LOG="/tmp/da_restore_last.log"
+RESTORE_LOG_DIR=""
+RESTORE_LOG=""
 
 # ============================================================================
 # Functions
 # ============================================================================
 
 show_banner() {
+  local GREEN='\033[0;32m'
+  local BRIGHT_GREEN='\033[1;32m'
+  local RESET='\033[0m'
+  
+  echo -e "${BRIGHT_GREEN}"
   cat <<'EOF'
-    _      __________ __  __       _____           _       __      
-   (_)____/ ___/ ___// / / /      / ___/__________(_)___  / /______
-  / / ___/\__ \\__ \/ /_/ /       \__ \/ ___/ ___/ / __ \/ __/ ___/
- / (__  )___/ /__/ / __  /       ___/ / /__/ /  / / /_/ / /_(__  ) 
-/_/____//____/____/_/ /_/       /____/\___/_/  /_/ .___/\__/____/  
-                                                /_/               
+    _         ____            __                 /\//\//
+   (_)____   / __ \___  _____/ /_____  ________ //\//\/ 
+  / / ___/  / /_/ / _ \/ ___/ __/ __ \/ ___/ _ \        
+ / (__  )  / _, _/  __(__  ) /_/ /_/ / /  /  __/        
+/_/____/  /_/ |_|\___/____/\__/\____/_/   \___/         
+                                                        
 EOF
+  echo -e "${RESET}"
   echo
 }
 
 log() {
-  echo "[$(date +'%F %T')] $*"
+  local msg="[$(date +'%F %T')] $*"
+  echo "${msg}" >&2
+  [[ -n "${RESTORE_LOG}" ]] && echo "${msg}" >> "${RESTORE_LOG}" 2>/dev/null || true
+}
+
+log_verbose() {
+  local msg="[$(date +'%F %T')] $*"
+  [[ -n "${RESTORE_LOG}" ]] && echo "${msg}" >> "${RESTORE_LOG}" 2>/dev/null || true
+}
+
+log_warning() {
+  local YELLOW='\033[1;33m'
+  local RESET='\033[0m'
+  echo -e "${YELLOW}[$(date +'%F %T')] $*${RESET}" >&2
+}
+
+log_error() {
+  local RED='\033[1;31m'
+  local RESET='\033[0m'
+  echo -e "${RED}[$(date +'%F %T')] $*${RESET}" >&2
+  [[ -n "${RESTORE_LOG}" ]] && echo "[$(date +'%F %T')] $*" >> "${RESTORE_LOG}" 2>/dev/null || true
 }
 
 usage() {
@@ -108,14 +136,55 @@ download_backup() {
   local url="$1"
   local dest="$2"
   
+  log "Downloading: ${url}"
+  
   if command -v wget >/dev/null 2>&1; then
-    wget -O "${dest}" "${url}" >> "${RAW_LOG}" 2>&1
+    if wget --progress=bar:force -O "${dest}" "${url}" >> "${RAW_LOG}" 2>&1; then
+      log "✓ Download completed"
+    else
+      log "ERROR: Download failed"
+      exit 1
+    fi
   elif command -v curl >/dev/null 2>&1; then
-    curl -L -o "${dest}" "${url}" >> "${RAW_LOG}" 2>&1
+    if curl -L --progress-bar -o "${dest}" "${url}" >> "${RAW_LOG}" 2>&1; then
+      log "✓ Download completed"
+    else
+      log "ERROR: Download failed"
+      exit 1
+    fi
   else
     log "ERROR: Neither wget nor curl is available. Please install one of them."
     exit 1
   fi
+}
+
+download_backup_parallel() {
+  local urls=("$@")
+  local pids=()
+  local dests=()
+  
+  log "Downloading ${#urls[@]} file(s) in parallel..."
+  
+  for url in "${urls[@]}"; do
+    local dest="${DEFAULT_DOWNLOAD_DIR}/$(basename "${url}")"
+    dests+=("${dest}")
+    
+    if command -v wget >/dev/null 2>&1; then
+      wget --progress=bar:force -O "${dest}" "${url}" >> "${RAW_LOG}" 2>&1 &
+    elif command -v curl >/dev/null 2>&1; then
+      curl -L --progress-bar -o "${dest}" "${url}" >> "${RAW_LOG}" 2>&1 &
+    fi
+    pids+=($!)
+  done
+  
+  for i in "${!pids[@]}"; do
+    wait "${pids[$i]}"
+    if [[ $? -eq 0 ]]; then
+      log "✓ Downloaded: $(basename "${dests[$i]}")"
+    else
+      log "ERROR: Failed to download: $(basename "${dests[$i]}")"
+    fi
+  done
 }
 
 get_file_size() {
@@ -124,6 +193,20 @@ get_file_size() {
     :
   else
     wc -c < "${file}"
+  fi
+}
+
+get_directory_size() {
+  local dir="$1"
+  if [[ ! -d "${dir}" ]]; then
+    echo "0"
+    return 1
+  fi
+  
+  if command -v du >/dev/null 2>&1; then
+    du -sb "${dir}" 2>/dev/null | awk '{print $1}'
+  else
+    find "${dir}" -type f -exec stat -c%s {} \; 2>/dev/null | awk '{sum+=$1} END {print sum+0}'
   fi
 }
 
@@ -164,15 +247,14 @@ check_disk_space() {
   avail_bytes=$((avail_kb * 1024))
   recommended_bytes=$((backup_size * 2))
   
-  log "Backup size:      $(human_size "${backup_size}")"
-  log "Free disk space:  $(human_size "${avail_bytes}") on filesystem of $(dirname "${backup_path}")"
-  log "Recommended free: $(human_size "${recommended_bytes}") (2x backup size)"
+  log_verbose "Backup size:      $(human_size "${backup_size}")"
+  log_verbose "Free disk space:  $(human_size "${avail_bytes}") on filesystem of $(dirname "${backup_path}")"
+  log_verbose "Recommended free: $(human_size "${recommended_bytes}") (2x backup size)"
   
   if (( avail_bytes < recommended_bytes )); then
-    log "WARNING: Free disk space is less than 2x backup size."
-    log "         Restore may fail due to insufficient space."
+    log "WARNING: Free disk space is less than 2x backup size. Restore may fail."
   else
-    log "Disk space check: OK (>= 2x backup size)."
+    log_verbose "Disk space check: OK (>= 2x backup size)."
   fi
 }
 
@@ -182,21 +264,22 @@ setup_restore_workdir() {
   local workdir="/home/admin/${username}"
   
   if [[ ! -d "${workdir}" ]]; then
-    log "Creating restore working directory: ${workdir}"
+    log_verbose "Creating restore working directory: ${workdir}"
     mkdir -p "${workdir}"
   fi
   
   if id "${owner}" >/dev/null 2>&1; then
-    log "Setting ownership of ${workdir} to ${owner}:${owner}"
+    log_verbose "Setting ownership of ${workdir} to ${owner}:${owner}"
     chown -R "${owner}:${owner}" "${workdir}"
   else
-    log "WARNING: System user '${owner}' not found. Skipping chown for ${workdir}."
+    log_verbose "WARNING: System user '${owner}' not found. Skipping chown for ${workdir}."
   fi
 }
 
 extract_domain_from_backup() {
   local backup_path="$1"
   local backup_filename="$(basename "${backup_path}")"
+  local backup_abs_path="$(readlink -f "${backup_path}" 2>/dev/null || echo "${backup_path}")"
   local username=""
   local random_str="$(openssl rand -hex 8 2>/dev/null || date +%s | sha256sum | cut -c1-16)"
   local temp_dir=""
@@ -211,9 +294,8 @@ extract_domain_from_backup() {
   temp_dir="/tmp/${username}_${random_str}"
   user_conf="${temp_dir}/backup/user.conf"
   
-  log "Extracting domain from backup (reading backup/user.conf)..."
-  log "  Temporary directory: ${temp_dir}"
-  log "  Backup file: ${backup_path}"
+  log_verbose "Extracting domain from backup (reading backup/user.conf)..."
+  log_verbose "  Temporary directory: ${temp_dir}"
   
   if [[ ! -f "${backup_path}" ]]; then
     log "ERROR: Backup file does not exist: ${backup_path}"
@@ -225,7 +307,15 @@ extract_domain_from_backup() {
     return 1
   fi
   
-  mkdir -p "${temp_dir}"
+  if ! mkdir -p "${temp_dir}" 2>/dev/null; then
+    log "ERROR: Failed to create temporary directory: ${temp_dir}"
+    return 1
+  fi
+  
+  if [[ ! -d "${temp_dir}" ]]; then
+    log "ERROR: Temporary directory was not created: ${temp_dir}"
+    return 1
+  fi
   
   if [[ "${backup_path}" == *.zst ]]; then
     if ! command -v zstd >/dev/null 2>&1; then
@@ -233,84 +323,65 @@ extract_domain_from_backup() {
       rm -rf "${temp_dir}" 2>/dev/null
       return 1
     fi
-    log "  Extracting with: tar -I zstd -xf ${backup_path} backup/user.conf -C ${temp_dir}"
-    EXTRACT_OUTPUT=$(tar -I zstd -xf "${backup_path}" backup/user.conf -C "${temp_dir}" 2>&1)
+    cd "${temp_dir}" || { log "ERROR: Failed to change to temp directory ${temp_dir}"; return 1; }
+    EXTRACT_OUTPUT=$(tar -I zstd -xf "${backup_abs_path}" backup/user.conf 2>&1)
     EXTRACT_EXIT=$?
+    cd - >/dev/null 2>&1
     echo "${EXTRACT_OUTPUT}" >> "${RAW_LOG}"
     
     if [[ ${EXTRACT_EXIT} -eq 0 ]]; then
       if [[ -f "${user_conf}" ]]; then
-        log "Checking user.conf file: ${user_conf}"
         domain=$(grep -E '^domain=' "${user_conf}" 2>/dev/null | cut -d'=' -f2 | tr -d ' ' | head -n1)
-        if [[ -n "${domain}" ]]; then
-          log "Successfully extracted and read domain from user.conf: ${domain}"
-        else
-          log "WARNING: Domain not found in user.conf file"
-        fi
       else
         log "WARNING: backup/user.conf not found in archive after extraction"
-        [[ -n "${EXTRACT_OUTPUT}" ]] && log "  Extraction output: ${EXTRACT_OUTPUT}"
       fi
     else
       log "ERROR: Failed to extract backup/user.conf from .zst archive (exit code: ${EXTRACT_EXIT})"
-      [[ -n "${EXTRACT_OUTPUT}" ]] && log "  Error output: ${EXTRACT_OUTPUT}"
     fi
   elif [[ "${backup_path}" == *.tar.gz ]] || [[ "${backup_path}" == *.tgz ]]; then
-    log "  Extracting with: tar -xzf ${backup_path} backup/user.conf -C ${temp_dir}"
-    EXTRACT_OUTPUT=$(tar -xzf "${backup_path}" backup/user.conf -C "${temp_dir}" 2>&1)
+    cd "${temp_dir}" || { log "ERROR: Failed to change to temp directory ${temp_dir}"; return 1; }
+    EXTRACT_OUTPUT=$(tar -xzf "${backup_abs_path}" backup/user.conf 2>&1)
     EXTRACT_EXIT=$?
+    cd - >/dev/null 2>&1
     echo "${EXTRACT_OUTPUT}" >> "${RAW_LOG}"
     
     if [[ ${EXTRACT_EXIT} -eq 0 ]]; then
       if [[ -f "${user_conf}" ]]; then
-        log "Checking user.conf file: ${user_conf}"
         domain=$(grep -E '^domain=' "${user_conf}" 2>/dev/null | cut -d'=' -f2 | tr -d ' ' | head -n1)
-        if [[ -n "${domain}" ]]; then
-          log "Successfully extracted and read domain from user.conf: ${domain}"
-        else
-          log "WARNING: Domain not found in user.conf file"
-        fi
       else
         log "WARNING: backup/user.conf not found in archive after extraction"
-        [[ -n "${EXTRACT_OUTPUT}" ]] && log "  Extraction output: ${EXTRACT_OUTPUT}"
       fi
     else
       log "ERROR: Failed to extract backup/user.conf from .tar.gz archive (exit code: ${EXTRACT_EXIT})"
-      [[ -n "${EXTRACT_OUTPUT}" ]] && log "  Error output: ${EXTRACT_OUTPUT}"
     fi
   elif [[ "${backup_path}" == *.tar ]]; then
-    log "  Extracting with: tar -xf ${backup_path} backup/user.conf -C ${temp_dir}"
-    EXTRACT_OUTPUT=$(tar -xf "${backup_path}" backup/user.conf -C "${temp_dir}" 2>&1)
+    cd "${temp_dir}" || { log "ERROR: Failed to change to temp directory ${temp_dir}"; return 1; }
+    EXTRACT_OUTPUT=$(tar -xf "${backup_abs_path}" backup/user.conf 2>&1)
     EXTRACT_EXIT=$?
+    cd - >/dev/null 2>&1
     echo "${EXTRACT_OUTPUT}" >> "${RAW_LOG}"
     
     if [[ ${EXTRACT_EXIT} -eq 0 ]]; then
       if [[ -f "${user_conf}" ]]; then
-        log "Checking user.conf file: ${user_conf}"
         domain=$(grep -E '^domain=' "${user_conf}" 2>/dev/null | cut -d'=' -f2 | tr -d ' ' | head -n1)
-        if [[ -n "${domain}" ]]; then
-          log "Successfully extracted and read domain from user.conf: ${domain}"
-        else
-          log "WARNING: Domain not found in user.conf file"
-        fi
       else
         log "WARNING: backup/user.conf not found in archive after extraction"
-        [[ -n "${EXTRACT_OUTPUT}" ]] && log "  Extraction output: ${EXTRACT_OUTPUT}"
       fi
     else
       log "ERROR: Failed to extract backup/user.conf from .tar archive (exit code: ${EXTRACT_EXIT})"
-      [[ -n "${EXTRACT_OUTPUT}" ]] && log "  Error output: ${EXTRACT_OUTPUT}"
     fi
   else
     log "WARNING: Unknown backup format. Cannot extract domain."
   fi
   
-  rm -rf "${temp_dir}" 2>/dev/null
-  
   if [[ -n "${domain}" ]]; then
-    echo "${domain}"
+    log_verbose "  Domain extracted successfully: ${domain}"
+    log_verbose "  Temporary directory: ${temp_dir}"
+    echo "${domain}" >&1
     return 0
   else
+    log_verbose "  Failed to extract domain. Temporary directory: ${temp_dir}"
+    log_verbose "  You can manually check: ${user_conf}"
     return 1
   fi
 }
@@ -318,14 +389,18 @@ extract_domain_from_backup() {
 check_domain_exists() {
   local domain="$1"
   local domainowners="/etc/virtual/domainowners"
+  local existing_user=""
   
   if [[ ! -f "${domainowners}" ]]; then
+    log "WARNING: /etc/virtual/domainowners file not found"
     return 1
   fi
   
-  if grep -q "^${domain}:" "${domainowners}" 2>/dev/null; then
-    grep "^${domain}:" "${domainowners}" | cut -d':' -f2 | tr -d ' '
-    return 0
+  if existing_user=$(grep "^${domain}:" "${domainowners}" 2>/dev/null | cut -d':' -f2 | tr -d ' ' | head -n1); then
+    if [[ -n "${existing_user}" ]]; then
+      echo "${existing_user}"
+      return 0
+    fi
   fi
   
   return 1
@@ -370,12 +445,12 @@ replace_old_username_references() {
     return 1
   fi
   
-  log "Replacing old username references (${old_username}) in ${user_home}..."
+  log "Replacing old username references (${old_username} -> ${existing_user})..."
   
   find "${user_home}" -type f -name "*${old_username}*" 2>/dev/null | while IFS= read -r old_file; do
     new_file="${old_file//${old_username}/${existing_user}}"
     if [[ "${old_file}" != "${new_file}" ]] && [[ ! -e "${new_file}" ]]; then
-      log "  Renaming: $(basename "${old_file}") -> $(basename "${new_file}")"
+      log_verbose "  Renaming file: $(basename "${old_file}") -> $(basename "${new_file}")"
       mv "${old_file}" "${new_file}" 2>/dev/null
     fi
   done
@@ -383,12 +458,22 @@ replace_old_username_references() {
   find "${user_home}" -type d -name "*${old_username}*" 2>/dev/null | sort -r | while IFS= read -r old_dir; do
     new_dir="${old_dir//${old_username}/${existing_user}}"
     if [[ "${old_dir}" != "${new_dir}" ]] && [[ ! -e "${new_dir}" ]]; then
-      log "  Renaming directory: $(basename "${old_dir}") -> $(basename "${new_dir}")"
+      log_verbose "  Renaming directory: $(basename "${old_dir}") -> $(basename "${new_dir}")"
       mv "${old_dir}" "${new_dir}" 2>/dev/null
     fi
   done
   
-  log "Username reference replacement completed."
+  log_verbose "  Replacing ${old_username} with ${existing_user} in file contents..."
+  find "${user_home}" -type f ! -name "*.log" ! -name "*.log.*" ! -path "*/tmp/*" ! -path "*/cache/*" ! -path "*/backup/*" 2>/dev/null | while IFS= read -r file; do
+    if [[ -f "${file}" ]] && [[ -r "${file}" ]] && [[ -w "${file}" ]]; then
+      if grep -q "${old_username}" "${file}" 2>/dev/null; then
+        log_verbose "  Updating file contents: ${file}"
+        sed -i "s/${old_username}/${existing_user}/g" "${file}" 2>/dev/null
+      fi
+    fi
+  done
+  
+  log "✓ Username reference replacement completed."
 }
 
 # ============================================================================
@@ -423,41 +508,48 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Display banner
+# Clear screen and display banner
+clear
 show_banner
+
+# Create restore log directory
+RESTORE_LOG_DIR="/tmp/da_restore_$(date +%s)_$$"
+mkdir -p "${RESTORE_LOG_DIR}" 2>/dev/null || RESTORE_LOG_DIR="/tmp"
+RESTORE_LOG="${RESTORE_LOG_DIR}/restore.log"
+: > "${RESTORE_LOG}"
 
 # Get backup input
 if [[ -z "${INPUT}" ]]; then
-  read -rp "Enter backup file path or URL: " INPUT
+  read -erp "Enter backup file path or URL: " INPUT
   [[ -z "${INPUT}" ]] && { echo "No input provided. Exiting."; exit 1; }
 fi
 
 log "DirectAdmin auto-restore starting..."
 : > "${RAW_LOG}"
-log "Raw log will be stored in: ${RAW_LOG}"
+log_verbose "Full log directory: ${RESTORE_LOG_DIR}"
+log_verbose "Full log file: ${RESTORE_LOG}"
 
 # Determine owner
 HOST_SHORT="$(hostname -s 2>/dev/null || hostname)"
 DEFAULT_OWNER="is${HOST_SHORT}"
 OWNER="${OWNER_OVERRIDE:-${DEFAULT_OWNER}}"
 
-log "Hostname short form: ${HOST_SHORT}"
-log "Default owner from hostname: ${DEFAULT_OWNER}"
-log "Requested/selected owner: ${OWNER}"
+log_verbose "Hostname short form: ${HOST_SHORT}"
+log_verbose "Default owner from hostname: ${DEFAULT_OWNER}"
+log_verbose "Requested/selected owner: ${OWNER}"
 
 # Validate owner exists
 if [[ ! -d "/usr/local/directadmin/data/users/${OWNER}" ]]; then
   log "WARNING: DirectAdmin user '${OWNER}' does not exist. Falling back to 'admin'."
   OWNER="admin"
 fi
-log "Using DirectAdmin owner for restore: ${OWNER}"
+log_verbose "Using DirectAdmin owner for restore: ${OWNER}"
 
 # Resolve backup path (URL or local file)
 if is_url "${INPUT}"; then
   mkdir -p "${DEFAULT_DOWNLOAD_DIR}"
   FILE_NAME="$(basename "${INPUT}")"
   BACKUP_PATH="${DEFAULT_DOWNLOAD_DIR}/${FILE_NAME}"
-  log "Detected URL input. Downloading backup to: ${BACKUP_PATH}"
   download_backup "${INPUT}" "${BACKUP_PATH}"
 else
   if [[ "${INPUT}" = /* ]]; then
@@ -465,18 +557,40 @@ else
   else
     BACKUP_PATH="$(pwd)/${INPUT}"
   fi
-  log "Detected local file input: ${BACKUP_PATH}"
+  log_verbose "Detected local file input: ${BACKUP_PATH}"
 fi
-
-[[ ! -f "${BACKUP_PATH}" ]] && { log "ERROR: Backup file does not exist: ${BACKUP_PATH}"; exit 1; }
 
 LOCAL_PATH="$(dirname "${BACKUP_PATH}")"
 FILE_NAME="$(basename "${BACKUP_PATH}")"
+ORIGINAL_BACKUP_PATH="${BACKUP_PATH}"
+ORIGINAL_FILE_NAME="${FILE_NAME}"
 
-log "Backup file resolved to:"
-log "  Path : ${BACKUP_PATH}"
-log "  Dir  : ${LOCAL_PATH}"
-log "  Name : ${FILE_NAME}"
+if [[ ! -f "${BACKUP_PATH}" ]]; then
+  log "WARNING: Backup file not found: ${BACKUP_PATH}"
+  log_verbose "Checking for user backup files in directory..."
+  
+  shopt -s nullglob
+  POSSIBLE_FILES=("${LOCAL_PATH}"/user.*.tar.zst "${LOCAL_PATH}"/user.*.tar.gz "${LOCAL_PATH}"/user.*.tar)
+  shopt -u nullglob
+  
+  if [[ ${#POSSIBLE_FILES[@]} -eq 1 ]] && [[ -f "${POSSIBLE_FILES[0]}" ]]; then
+    log "Found backup file: $(basename "${POSSIBLE_FILES[0]}")"
+    BACKUP_PATH="${POSSIBLE_FILES[0]}"
+    FILE_NAME="$(basename "${BACKUP_PATH}")"
+    log_verbose "Using backup file: ${BACKUP_PATH}"
+  elif [[ ${#POSSIBLE_FILES[@]} -gt 1 ]]; then
+    log "ERROR: Multiple backup files found. Please specify the exact filename."
+    exit 1
+  else
+    log "ERROR: Backup file does not exist: ${BACKUP_PATH}"
+    exit 1
+  fi
+fi
+
+log_verbose "Backup file resolved to:"
+log_verbose "  Path : ${BACKUP_PATH}"
+log_verbose "  Dir  : ${LOCAL_PATH}"
+log_verbose "  Name : ${FILE_NAME}"
 
 # Detect server IP
 SERVER_IP="${SERVER_IP:-$(detect_server_ip)}"
@@ -486,7 +600,7 @@ SERVER_IP="${SERVER_IP:-$(detect_server_ip)}"
   log "       SERVER_IP=1.2.3.4 $0 ${INPUT}"
   exit 1
 }
-log "Using server IP for restore: ${SERVER_IP}"
+log_verbose "Using server IP for restore: ${SERVER_IP}"
 
 # Check disk space
 check_disk_space "${BACKUP_PATH}"
@@ -494,44 +608,59 @@ check_disk_space "${BACKUP_PATH}"
 # Check if domain from backup already exists on server
 # We extract backup/user.conf to get the domain name, which tells us if we should
 # restore to an existing user (if domain already exists) or create a new user
-log "Checking if domain from backup already exists on server..."
-log "  (Extracting backup/user.conf to read domain name...)"
+log "Checking domain from backup..."
 BACKUP_DOMAIN="$(extract_domain_from_backup "${BACKUP_PATH}")"
 ORIGINAL_USERNAME=""
 EXISTING_USER=""
+USER_EXISTED_BEFORE_RESTORE=0
 
 if [[ -n "${BACKUP_DOMAIN}" ]]; then
-  log "Extracted domain from backup: ${BACKUP_DOMAIN}"
+  log_verbose "Extracted domain from backup: ${BACKUP_DOMAIN}"
   EXISTING_USER="$(check_domain_exists "${BACKUP_DOMAIN}")"
   
   if [[ -n "${EXISTING_USER}" ]]; then
-    echo
-    log "=========================================="
-    log "DOMAIN ALREADY EXISTS ON SERVER:"
-    log "  Domain: ${BACKUP_DOMAIN}"
-    log "  Existing User: ${EXISTING_USER}"
-    log "=========================================="
-    echo
+    USER_EXISTED_BEFORE_RESTORE=1
     ORIGINAL_USERNAME="$(parse_username_from_filename "${FILE_NAME}")"
+    echo
+    log_warning "⚠️  USER ALREADY EXISTS: Domain '${BACKUP_DOMAIN}' belongs to user '${EXISTING_USER}'"
+    if [[ -n "${ORIGINAL_USERNAME}" ]] && [[ "${ORIGINAL_USERNAME}" != "${EXISTING_USER}" ]]; then
+      log_warning "⚠️  Restore will be performed on existing user '${EXISTING_USER}' (backup is for '${ORIGINAL_USERNAME}')"
+    else
+      log_warning "⚠️  Restore will be performed on existing user '${EXISTING_USER}'"
+    fi
+    
+    # Check existing user's directory size
+    USER_HOME="/home/${EXISTING_USER}"
+    if [[ -d "${USER_HOME}" ]]; then
+      DIR_SIZE=$(get_directory_size "${USER_HOME}")
+      DIR_SIZE_MB=$((DIR_SIZE / 1024 / 1024))
+      SIZE_THRESHOLD_MB=10
+      
+      if [[ ${DIR_SIZE_MB} -gt ${SIZE_THRESHOLD_MB} ]]; then
+        DIR_SIZE_HUMAN=$(human_size "${DIR_SIZE}")
+        log_error "⚠️  WARNING: User '${EXISTING_USER}' has existing data (${DIR_SIZE_HUMAN}) in /home/${EXISTING_USER}!"
+        log_error "⚠️  Restoring will overwrite this data. Current disk usage: ${DIR_SIZE_HUMAN}"
+      fi
+    fi
     
     if [[ -n "${ORIGINAL_USERNAME}" ]] && [[ "${ORIGINAL_USERNAME}" != "${EXISTING_USER}" ]]; then
-      log "Backup is for user '${ORIGINAL_USERNAME}' but domain belongs to '${EXISTING_USER}'"
-      log "Renaming backup file to restore to existing user ${EXISTING_USER}..."
+      log_verbose "Backup is for user '${ORIGINAL_USERNAME}' but domain belongs to '${EXISTING_USER}'"
+      log_verbose "Renaming backup file to restore to existing user ${EXISTING_USER}..."
       
       BACKUP_PATH="$(rename_backup_for_existing_user "${BACKUP_PATH}" "${ORIGINAL_USERNAME}" "${EXISTING_USER}")"
       FILE_NAME="$(basename "${BACKUP_PATH}")"
       LOCAL_PATH="$(dirname "${BACKUP_PATH}")"
       
-      log "Backup file renamed. New path: ${BACKUP_PATH}"
+      log_verbose "Backup file renamed. New path: ${BACKUP_PATH}"
       USERNAME="${EXISTING_USER}"
     else
       USERNAME="${EXISTING_USER}"
     fi
   else
-    log "Domain ${BACKUP_DOMAIN} does not exist on this server. Proceeding with normal restore."
+    log_verbose "Domain ${BACKUP_DOMAIN} does not exist on this server. Proceeding with normal restore."
   fi
 else
-  log "Could not extract domain from backup. Proceeding with normal restore."
+  log_verbose "Could not extract domain from backup. Proceeding with normal restore."
 fi
 
 # Detect username from filename (if not already set from domain check)
@@ -541,15 +670,33 @@ fi
 
 if [[ -n "${USERNAME}" ]]; then
   USER_DIR="/usr/local/directadmin/data/users/${USERNAME}"
+  if [[ -d "${USER_DIR}" ]] && [[ ${USER_EXISTED_BEFORE_RESTORE} -eq 0 ]]; then
+    USER_EXISTED_BEFORE_RESTORE=1
+    
+    # Check existing user's directory size
+    USER_HOME="/home/${USERNAME}"
+    if [[ -d "${USER_HOME}" ]]; then
+      DIR_SIZE=$(get_directory_size "${USER_HOME}")
+      DIR_SIZE_MB=$((DIR_SIZE / 1024 / 1024))
+      SIZE_THRESHOLD_MB=10
+      
+      if [[ ${DIR_SIZE_MB} -gt ${SIZE_THRESHOLD_MB} ]]; then
+        DIR_SIZE_HUMAN=$(human_size "${DIR_SIZE}")
+        log_error "⚠️  WARNING: User '${USERNAME}' has existing data (${DIR_SIZE_HUMAN}) in /home/${USERNAME}!"
+        log_error "⚠️  Restoring will overwrite this data. Current disk usage: ${DIR_SIZE_HUMAN}"
+      fi
+    fi
+  fi
+  
   if [[ -d "${USER_DIR}" ]]; then
     if [[ -n "${ORIGINAL_USERNAME}" ]] && [[ "${ORIGINAL_USERNAME}" != "${USERNAME}" ]]; then
-      log "Domain ${BACKUP_DOMAIN} from backup belongs to existing user: ${USERNAME}"
-      log "Backup will be restored to existing user ${USERNAME} (original backup was for ${ORIGINAL_USERNAME})"
+      log_verbose "Domain ${BACKUP_DOMAIN} from backup belongs to existing user: ${USERNAME}"
+      log_verbose "Backup will be restored to existing user ${USERNAME} (original backup was for ${ORIGINAL_USERNAME})"
       echo
-      read -rp "Continue and restore backup to existing user ${USERNAME}? [y/N]: " CONFIRM
+      read -erp "Continue and restore backup to existing user ${USERNAME}? [y/N]: " CONFIRM
       case "${CONFIRM}" in
         [yY]|[yY][eE][sS])
-          log "User chose to continue restore to existing user ${USERNAME}."
+          log_verbose "User chose to continue restore to existing user ${USERNAME}."
           ;;
         *)
           log "Restore was NOT confirmed. Aborting restore."
@@ -557,12 +704,12 @@ if [[ -n "${USERNAME}" ]]; then
           ;;
       esac
     else
-      log "Detected username from backup filename: ${USERNAME} (EXISTS on this server)"
+      log_verbose "Detected username from backup filename: ${USERNAME} (EXISTS on this server)"
       echo
-      read -rp "User ${USERNAME} already exists. Continue and restore over this existing user from backup? [y/N]: " CONFIRM
+      read -erp "User ${USERNAME} already exists. Continue and restore over this existing user from backup? [y/N]: " CONFIRM
       case "${CONFIRM}" in
         [yY]|[yY][eE][sS])
-          log "User chose to continue restore and overwrite existing user ${USERNAME}."
+          log_verbose "User chose to continue restore and overwrite existing user ${USERNAME}."
           ;;
         *)
           log "User ${USERNAME} exists and restore was NOT confirmed. Aborting restore."
@@ -571,11 +718,11 @@ if [[ -n "${USERNAME}" ]]; then
       esac
     fi
   else
-    log "Detected username from backup filename: ${USERNAME} (does NOT exist yet)"
+    log_verbose "Detected username from backup filename: ${USERNAME} (does NOT exist yet)"
   fi
   setup_restore_workdir "${USERNAME}" "${OWNER}"
 else
-  log "WARNING: Could not parse username from filename. Skipping user-specific working dir."
+  log_verbose "WARNING: Could not parse username from filename. Skipping user-specific working dir."
 fi
 
 # Snapshot log sizes
@@ -592,109 +739,106 @@ FQDN_HOST="$(hostname -f 2>/dev/null || echo "${HOST_SHORT}")"
 DA_PORT="$(detect_da_port)"
 LOGIN_URL="$(get_login_url "${OWNER}")"
 
-log "Web access / monitoring info:"
-log "  Detected DirectAdmin port: ${DA_PORT}"
 if [[ -n "${LOGIN_URL}" ]]; then
-  log "  One-time DirectAdmin login URL (auto-login as main admin/owner):"
-  log "    ${LOGIN_URL}"
-else
-  log "  Could not auto-generate one-time login URL via DirectAdmin binary."
+  log "Login URL: ${LOGIN_URL}"
 fi
 
-log "  Evo backups in-progress (hostname):"
-log "    https://${FQDN_HOST}:${DA_PORT}/evo/admin/backups/in-progress"
-log "  Evo backups in-progress (server IP):"
-log "    https://${SERVER_IP}:${DA_PORT}/evo/admin/backups/in-progress"
+log "In-progress URL: https://${FQDN_HOST}:${DA_PORT}/evo/admin/backups/in-progress"
+log_verbose "  Also available via IP: https://${SERVER_IP}:${DA_PORT}/evo/admin/backups/in-progress"
 
 # Run DirectAdmin restore
-log "Running DirectAdmin restore task..."
-log "Full raw output will be appended to: ${RAW_LOG}"
+log "Starting restore..."
+log_verbose "Full raw output will be appended to: ${RAW_LOG}"
 
 RESTORE_EXIT=0
 if ! "${DA_BIN}" taskq \
   --run="action=restore&ip_choice=select&ip=${SERVER_IP}&local_path=${LOCAL_PATH}&owner=${OWNER}&select0=${FILE_NAME}&type=admin&value=multiple&when=now&where=local" \
   >> "${RAW_LOG}" 2>&1; then
   RESTORE_EXIT=$?
-  log "WARNING: DirectAdmin restore command exited with non-zero status: ${RESTORE_EXIT}"
+  log "WARNING: Restore command exited with non-zero status: ${RESTORE_EXIT}"
 fi
 
-log "Restore command finished. Collecting log summary..."
+log "Restore completed. Checking results..."
 
-# Parse restore logs
-echo
-echo "================ Restore summary (system.log) ================"
-
+# Parse restore logs - save full logs, show concise summary
 if [[ -f "${SYSTEM_LOG}" ]]; then
   NEW_SYS_LINES="$(tail -n +$((SYS_LINES_BEFORE + 1)) "${SYSTEM_LOG}" 2>/dev/null || true)"
+  echo "${NEW_SYS_LINES}" >> "${RESTORE_LOG}" 2>/dev/null || true
   
   if [[ -n "${NEW_SYS_LINES}" ]]; then
-    echo "${NEW_SYS_LINES}" | tail -n 80
-    
-    SUCCESS_LINE="$(echo "${NEW_SYS_LINES}" | grep -i 'has been restored from' | tail -n 1 || true)"
-    if [[ -n "${SUCCESS_LINE}" ]]; then
-      echo
-      log "Detected successful restore line:"
-      echo "  ${SUCCESS_LINE}"
+    if [[ -n "${USERNAME}" ]]; then
+      FILTERED_LINES="$(echo "${NEW_SYS_LINES}" | grep -i "${USERNAME}" || true)"
+      SUCCESS_LINE="$(echo "${FILTERED_LINES}" | grep -i "has been restored from" | tail -n 1 || true)"
+      
+      if [[ -n "${SUCCESS_LINE}" ]]; then
+        log "✓ Restore successful: ${SUCCESS_LINE}"
+      else
+        log "⚠️  No explicit success message found for user ${USERNAME}"
+      fi
+      
+      [[ -n "${USERNAME}" ]] && echo "${NEW_SYS_LINES}" | grep -q "User ${USERNAME} was suspended in the backup" && SUSPENDED_IN_BACKUP=1
     else
-      echo
-      log "No explicit \"has been restored\" line detected for this run."
+      SUCCESS_LINE="$(echo "${NEW_SYS_LINES}" | grep -i "has been restored from" | tail -n 1 || true)"
+      if [[ -n "${SUCCESS_LINE}" ]]; then
+        log "✓ Restore completed"
+      fi
     fi
-    
-    [[ -n "${USERNAME}" ]] && echo "${NEW_SYS_LINES}" | grep -q "User ${USERNAME} was suspended in the backup" && SUSPENDED_IN_BACKUP=1
-  else
-    log "No new lines in system.log for this run."
   fi
-else
-  log "system.log not found at: ${SYSTEM_LOG}"
 fi
-
-echo
-echo "================ Error summary (errortaskq.log) ================"
 
 if [[ -f "${ERROR_LOG}" ]]; then
   NEW_ERR_LINES="$(tail -n +$((ERR_LINES_BEFORE + 1)) "${ERROR_LOG}" 2>/dev/null || true)"
+  echo "${NEW_ERR_LINES}" >> "${RESTORE_LOG}" 2>/dev/null || true
+  
   if [[ -n "${NEW_ERR_LINES}" ]]; then
-    echo "${NEW_ERR_LINES}" | tail -n 80
-  else
-    echo "(no new errors for this run)"
+    if [[ -n "${USERNAME}" ]]; then
+      FILTERED_ERR_LINES="$(echo "${NEW_ERR_LINES}" | grep -i "${USERNAME}\|${FILE_NAME}" || true)"
+      if [[ -n "${FILTERED_ERR_LINES}" ]]; then
+        log "⚠️  Errors found. Check full log: ${RESTORE_LOG}"
+      fi
+    fi
   fi
-else
-  log "errortaskq.log not found at: ${ERROR_LOG}"
 fi
-
-echo
 
 # Auto unsuspend user (if needed)
 if [[ -n "${USERNAME}" ]] && (( SUSPENDED_IN_BACKUP == 1 )); then
-  log "User ${USERNAME} WAS suspended in the backup. Trying to UNSUSPEND now..."
+  log "Unsuspending user ${USERNAME}..."
   if "${DA_BIN}" --unsuspend-user "user=${USERNAME}" >> "${RAW_LOG}" 2>&1; then
-    log "User ${USERNAME} has been UNSUSPENDED by this script."
+    log "✓ User ${USERNAME} unsuspended"
   else
-    log "WARNING: Failed to unsuspend user ${USERNAME}. Check ${RAW_LOG} for details."
+    log "WARNING: Failed to unsuspend user ${USERNAME}"
   fi
-elif [[ -n "${USERNAME}" ]]; then
-  log "User ${USERNAME} was not reported as suspended in this backup run."
 fi
 
-# Reset password after restore (if successful)
-if [[ -n "${USERNAME}" ]] && [[ -n "${SUCCESS_LINE}" ]]; then
+# Reset password after restore (if successful and user didn't exist before)
+if [[ -n "${USERNAME}" ]] && [[ -n "${SUCCESS_LINE}" ]] && [[ ${USER_EXISTED_BEFORE_RESTORE} -eq 0 ]]; then
   log "Resetting password for user ${USERNAME}..."
   NEW_PASSWORD="$(generate_password)"
   
   if "${DA_BIN}" --set-password "user=${USERNAME}" "password=${NEW_PASSWORD}" >> "${RAW_LOG}" 2>&1; then
-    log "Password has been reset for user ${USERNAME}."
+    USER_LOGIN_URL="$(get_login_url "${USERNAME}")"
+    FQDN_HOST="$(hostname -f 2>/dev/null || echo "${HOST_SHORT}")"
+    DA_PORT="$(detect_da_port)"
+    
     echo
     log "=========================================="
-    log "NEW PASSWORD for user ${USERNAME}:"
-    log "  ${NEW_PASSWORD}"
+    log "Login Information:"
+    if [[ -n "${USER_LOGIN_URL}" ]]; then
+      log "Login URL: ${USER_LOGIN_URL}"
+    else
+      log "Login URL: https://${FQDN_HOST}:${DA_PORT}"
+    fi
+    log "Username: ${USERNAME}"
+    log "Password: ${NEW_PASSWORD}"
     log "=========================================="
     echo
-    log "IMPORTANT: Save this password securely. It will not be shown again."
   else
-    log "WARNING: Failed to reset password for user ${USERNAME}. Check ${RAW_LOG} for details."
+    log "WARNING: Failed to reset password for user ${USERNAME}"
   fi
+elif [[ -n "${USERNAME}" ]] && [[ ${USER_EXISTED_BEFORE_RESTORE} -eq 1 ]] && [[ -n "${SUCCESS_LINE}" ]]; then
+  log_verbose "Skipping password reset: User ${USERNAME} existed before restore (password preserved)."
 elif [[ -n "${USERNAME}" ]] && [[ -z "${SUCCESS_LINE}" ]]; then
-  log "Skipping password reset: No successful restore detected for user ${USERNAME}."
+  log_verbose "Skipping password reset: No successful restore detected for user ${USERNAME}."
 fi
 
 # Replace old username references if restored to existing user
@@ -703,6 +847,23 @@ if [[ -n "${ORIGINAL_USERNAME}" ]] && [[ -n "${USERNAME}" ]] && [[ "${ORIGINAL_U
   replace_old_username_references "${USERNAME}" "${ORIGINAL_USERNAME}"
 fi
 
+# Restore original backup filename if it was renamed
+if [[ -n "${ORIGINAL_BACKUP_PATH}" ]] && [[ "${BACKUP_PATH}" != "${ORIGINAL_BACKUP_PATH}" ]] && [[ -f "${BACKUP_PATH}" ]]; then
+  log "Restoring original backup filename..."
+  if mv "${BACKUP_PATH}" "${ORIGINAL_BACKUP_PATH}" 2>/dev/null; then
+    log "✓ Backup file renamed back to: $(basename "${ORIGINAL_BACKUP_PATH}")"
+  else
+    log "WARNING: Failed to restore original backup filename"
+  fi
+fi
+
+# Copy raw log to restore log directory
+if [[ -f "${RAW_LOG}" ]]; then
+  cp "${RAW_LOG}" "${RESTORE_LOG_DIR}/raw.log" 2>/dev/null || true
+fi
+
 # Final summary
-log "Done. Full raw output is available in: ${RAW_LOG}"
-[[ ${RESTORE_EXIT} -ne 0 ]] && log "NOTE: Restore command exit code was ${RESTORE_EXIT}. Please double-check the logs above and ${RAW_LOG}."
+echo
+log "Full restore log saved to: ${RESTORE_LOG}"
+log_verbose "Log directory: ${RESTORE_LOG_DIR}"
+[[ ${RESTORE_EXIT} -ne 0 ]] && log "⚠️  Restore exit code: ${RESTORE_EXIT}. Check logs for details."
