@@ -27,6 +27,7 @@ RAW_LOG="/tmp/da_restore_last.log"
 RESTORE_LOG_DIR=""
 RESTORE_LOG=""
 SAVED_PASSWORD_HASH=""
+USERNAME=""
 
 # ============================================================================
 # Functions
