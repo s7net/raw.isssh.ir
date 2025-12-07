@@ -132,13 +132,14 @@ for server in $(printf '%s\n' "${!SERVER_SET[@]}" | sort); do
 done
 echo
 
+CURRENT_HOST=$(hostname -s)
+
 echo "Private note usage for '${USERNAME}':"
-printf '=%.0s' $(seq 1 $((27 + ${#USERNAME})))   # dynamic underline length
-echo
+echo "====================================="
 echo
 
 for server in $(printf '%s\n' "${!SERVER_SET[@]}" | sort); do
-  echo "[${server}]"
+  echo "  [${CURRENT_HOST}]"
   echo "  bash <(curl -Ls ${SCRIPT_URL}) -u ${USERNAME} -s ${server}"
   echo
 done
