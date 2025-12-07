@@ -38,12 +38,12 @@ show_banner() {
   
   echo -e "${BRIGHT_GREEN}"
   cat <<'EOF'
-    _         ____            __                 /\//\//
-   (_)____   / __ \___  _____/ /_____  ________ //\//\/ 
-  / / ___/  / /_/ / _ \/ ___/ __/ __ \/ ___/ _ \        
- / (__  )  / _, _/  __(__  ) /_/ /_/ / /  /  __/        
-/_/____/  /_/ |_|\___/____/\__/\____/_/   \___/         
-                                                        
+    _      __________ __  __       _____           _       __      
+   (_)____/ ___/ ___// / / /      / ___/__________(_)___  / /______
+  / / ___/\__ \\__ \/ /_/ /       \__ \/ ___/ ___/ / __ \/ __/ ___/
+ / (__  )___/ /__/ / __  /       ___/ / /__/ /  / / /_/ / /_(__  ) 
+/_/____//____/____/_/ /_/       /____/\___/_/  /_/ .___/\__/____/  
+                                                /_/               
 EOF
   echo -e "${RESET}"
   echo
@@ -439,41 +439,38 @@ replace_old_username_references() {
   local existing_user="$1"
   local old_username="$2"
   local user_home="/home/${existing_user}"
+  local files_updated=0
   
   if [[ ! -d "${user_home}" ]]; then
     log "WARNING: User home directory ${user_home} not found. Skipping username reference replacement."
     return 1
   fi
   
-  log "Replacing old username references (${old_username} -> ${existing_user})..."
+  log "Replacing old username in file contents (${old_username} -> ${existing_user})..."
   
-  find "${user_home}" -type f -name "*${old_username}*" 2>/dev/null | while IFS= read -r old_file; do
-    new_file="${old_file//${old_username}/${existing_user}}"
-    if [[ "${old_file}" != "${new_file}" ]] && [[ ! -e "${new_file}" ]]; then
-      log_verbose "  Renaming file: $(basename "${old_file}") -> $(basename "${new_file}")"
-      mv "${old_file}" "${new_file}" 2>/dev/null
-    fi
-  done
-  
-  find "${user_home}" -type d -name "*${old_username}*" 2>/dev/null | sort -r | while IFS= read -r old_dir; do
-    new_dir="${old_dir//${old_username}/${existing_user}}"
-    if [[ "${old_dir}" != "${new_dir}" ]] && [[ ! -e "${new_dir}" ]]; then
-      log_verbose "  Renaming directory: $(basename "${old_dir}") -> $(basename "${new_dir}")"
-      mv "${old_dir}" "${new_dir}" 2>/dev/null
-    fi
-  done
-  
-  log_verbose "  Replacing ${old_username} with ${existing_user} in file contents..."
-  find "${user_home}" -type f ! -name "*.log" ! -name "*.log.*" ! -path "*/tmp/*" ! -path "*/cache/*" ! -path "*/backup/*" 2>/dev/null | while IFS= read -r file; do
+  # Replace old username in file contents only
+  while IFS= read -r file; do
     if [[ -f "${file}" ]] && [[ -r "${file}" ]] && [[ -w "${file}" ]]; then
       if grep -q "${old_username}" "${file}" 2>/dev/null; then
-        log_verbose "  Updating file contents: ${file}"
-        sed -i "s/${old_username}/${existing_user}/g" "${file}" 2>/dev/null
+        if sed -i "s/${old_username}/${existing_user}/g" "${file}" 2>/dev/null; then
+          log_verbose "  Updated file contents: ${file}"
+          ((files_updated++))
+        fi
       fi
     fi
-  done
+  done < <(find "${user_home}" -type f ! -name "*.log" ! -name "*.log.*" ! -path "*/tmp/*" ! -path "*/cache/*" ! -path "*/backup/*" 2>/dev/null)
   
-  log "✓ Username reference replacement completed."
+  # Verify replacement - check if any old username references still exist in file contents
+  REMAINING_REFS=$(find "${user_home}" -type f ! -name "*.log" ! -name "*.log.*" ! -path "*/tmp/*" ! -path "*/cache/*" ! -path "*/backup/*" 2>/dev/null | xargs grep -l "${old_username}" 2>/dev/null | wc -l || echo "0")
+  
+  log "✓ Username replacement in file contents completed."
+  log "  Files updated: ${files_updated}"
+  
+  if [[ ${REMAINING_REFS} -gt 0 ]]; then
+    log "⚠️  WARNING: ${REMAINING_REFS} file(s) still contain references to '${old_username}' in their contents."
+  else
+    log "✓ Verification: No remaining references to '${old_username}' found in file contents."
+  fi
 }
 
 # ============================================================================
@@ -707,15 +704,15 @@ if [[ -n "${USERNAME}" ]]; then
       log_verbose "Detected username from backup filename: ${USERNAME} (EXISTS on this server)"
       echo
       read -erp "User ${USERNAME} already exists. Continue and restore over this existing user from backup? [y/N]: " CONFIRM
-      case "${CONFIRM}" in
-        [yY]|[yY][eE][sS])
+    case "${CONFIRM}" in
+      [yY]|[yY][eE][sS])
           log_verbose "User chose to continue restore and overwrite existing user ${USERNAME}."
-          ;;
-        *)
-          log "User ${USERNAME} exists and restore was NOT confirmed. Aborting restore."
-          exit 0
-          ;;
-      esac
+        ;;
+      *)
+        log "User ${USERNAME} exists and restore was NOT confirmed. Aborting restore."
+        exit 0
+        ;;
+    esac
     fi
   else
     log_verbose "Detected username from backup filename: ${USERNAME} (does NOT exist yet)"
@@ -764,13 +761,13 @@ log "Restore completed. Checking results..."
 if [[ -f "${SYSTEM_LOG}" ]]; then
   NEW_SYS_LINES="$(tail -n +$((SYS_LINES_BEFORE + 1)) "${SYSTEM_LOG}" 2>/dev/null || true)"
   echo "${NEW_SYS_LINES}" >> "${RESTORE_LOG}" 2>/dev/null || true
-  
+
   if [[ -n "${NEW_SYS_LINES}" ]]; then
     if [[ -n "${USERNAME}" ]]; then
       FILTERED_LINES="$(echo "${NEW_SYS_LINES}" | grep -i "${USERNAME}" || true)"
       SUCCESS_LINE="$(echo "${FILTERED_LINES}" | grep -i "has been restored from" | tail -n 1 || true)"
-      
-      if [[ -n "${SUCCESS_LINE}" ]]; then
+
+    if [[ -n "${SUCCESS_LINE}" ]]; then
         log "✓ Restore successful: ${SUCCESS_LINE}"
       else
         log "⚠️  No explicit success message found for user ${USERNAME}"
