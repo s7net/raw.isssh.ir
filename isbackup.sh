@@ -124,25 +124,16 @@ for file in "${BACKUP_FILES[@]}"; do
 done
 
 SERVER_COUNT=${#SERVER_SET[@]}
-
-echo "Servers with backups for '${USERNAME}':"
-echo "======================================="
-for server in $(printf '%s\n' "${!SERVER_SET[@]}" | sort); do
-  echo "  • ${server}"
-done
-echo
-
 CURRENT_HOST=$(hostname -s)
 
 echo "Private note usage for '${USERNAME}':"
 echo "====================================="
-echo
-
 for server in $(printf '%s\n' "${!SERVER_SET[@]}" | sort); do
-  echo "  [${CURRENT_HOST}]"
+  echo "  [${CURRENT_HOST} - ${server}]"
   echo "  bash <(curl -Ls ${SCRIPT_URL}) -u ${USERNAME} -s ${server}"
   echo
 done
+echo
 
 echo "Available backups (newest first):"
 echo "================================="
