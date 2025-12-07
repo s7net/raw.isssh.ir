@@ -3,6 +3,7 @@
 set -uo pipefail
 
 BACKUP_BASE="/home/*/weekly*"
+SCRIPT_URL="https://raw.isssh.ir/isbackup.sh"
 SERVER_FILTER=""
 USERNAME=""
 
@@ -130,6 +131,17 @@ for server in $(printf '%s\n' "${!SERVER_SET[@]}" | sort); do
   echo "  • ${server}"
 done
 echo
+
+echo "Private note usage for '${USERNAME}':"
+printf '=%.0s' $(seq 1 $((27 + ${#USERNAME})))   # dynamic underline length
+echo
+echo
+
+for server in $(printf '%s\n' "${!SERVER_SET[@]}" | sort); do
+  echo "[${server}]"
+  echo "  bash <(curl -Ls ${SCRIPT_URL}) -u ${USERNAME} -s ${server}"
+  echo
+done
 
 echo "Available backups (newest first):"
 echo "================================="
