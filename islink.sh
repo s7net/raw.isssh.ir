@@ -19,9 +19,10 @@ EOF
   echo
 }
 
-run_no_lve_banner() {
-  "$@" 2> >(grep -v 'LVE' | grep -v 'cloudlinux.com' >&2)
-}
+if [[ $EUID -ne 0 ]]; then
+  echo "ERROR: This script must be run as root."
+  exit 99
+fi
 
 clear
 show_banner
@@ -64,31 +65,33 @@ if [[ -d "${src}" ]]; then
   esac
 fi
 
+if ! command -v rsync >/dev/null 2>&1; then
+  echo "ERROR: rsync command not found."
+  exit 9
+fi
+
 host="$(hostname -f)"
 public_ip="$(curl -s ifconfig.me 2>/dev/null || echo "")"
 base="$(basename -- "${src}")"
 
 echo "Copying file to web directory..."
 
-if command -v rsync >/dev/null 2>&1; then
-  if run_no_lve_banner sudo rsync --whole-file --inplace --no-compress --info=progress2 "${src}" "${dst}/${base}"; then
-    COPY_SUCCESS=1
-  else
-    COPY_SUCCESS=0
-  fi
+if rsync --whole-file --inplace --no-compress --info=progress2 "${src}" "${dst}/${base}"; then
+  COPY_SUCCESS=1
 else
-  echo "ERROR: rsync command not found."
-  exit 9
+  COPY_SUCCESS=0
 fi
 
 if [[ ${COPY_SUCCESS} -eq 1 ]]; then
-  sudo chown root:root -- "${dst}/${base}"
-  sudo chmod 644 -- "${dst}/${base}"
+  chown root:root -- "${dst}/${base}"
+  chmod 644 -- "${dst}/${base}"
   echo
   echo "✓ Done: ${dst}/${base} (owner root:root, mode 644)"
   echo
   echo "📥 Download URL (hostname): http://${host}/${base}"
-  [[ -n "${public_ip}" ]] && echo "📥 Download URL (public IP): http://${public_ip}/${base}"
+  if [[ -n "${public_ip}" ]]; then
+    echo "📥 Download URL (public IP): http://${public_ip}/${base}"
+  fi
 else
   echo "ERROR: Failed to copy file to ${dst}/${base}"
   exit 3
