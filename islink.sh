@@ -30,7 +30,49 @@ show_banner
 read -erp "Please input path to file: " src
 
 src="$(readlink -f -- "${src}" 2>/dev/null || printf "%s\n" "${src}")"
-dst="/var/www/html"
+
+
+declare -a CANDIDATES=(
+  "/var/www/html"        
+  "/www/wwwroot/default" 
+)
+
+AVAILABLE=()
+for path in "${CANDIDATES[@]}"; do
+  if [[ -d "${path}" ]]; then
+    AVAILABLE+=("${path}")
+  fi
+done
+
+if [[ ${#AVAILABLE[@]} -eq 0 ]]; then
+  echo "WARNING: No known web root directories found."
+  read -erp "Please enter destination web root path manually: " dst
+else
+  if [[ ${#AVAILABLE[@]} -eq 1 ]]; then
+    dst="${AVAILABLE[0]}"
+    echo "Detected web root: ${dst}"
+    if [[ "${dst}" == "/www/wwwroot/default" ]]; then
+      echo "(Looks like aaPanel default web root)"
+    elif [[ "${dst}" == "/var/www/html" ]]; then
+      echo "(Standard /var/www/html web root)"
+    fi
+  else
+    echo "Multiple possible web roots detected:"
+    i=1
+    for path in "${AVAILABLE[@]}"; do
+      echo "  [$i] ${path}"
+      ((i++))
+    done
+    read -erp "Select destination [1-${#AVAILABLE[@]}] (default 1): " choice
+    choice="${choice:-1}"
+    if ! [[ "${choice}" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#AVAILABLE[@]} )); then
+      echo "Invalid choice, defaulting to 1."
+      choice=1
+    fi
+    dst="${AVAILABLE[$((choice-1))]}"
+    echo "Using: ${dst}"
+  fi
+fi
 
 if [[ ! -e "${src}" ]]; then
   echo "ERROR: Source file or directory not found: ${src}"
@@ -47,6 +89,10 @@ if [[ -d "${src}" ]]; then
   read -erp "This is a folder. Create zip file and use it as backup? [y/N]: " CREATE_ZIP
   case "${CREATE_ZIP}" in
     [yY]|[yY][eE][sS])
+      if ! command -v zip >/dev/null 2>&1; then
+        echo "ERROR: 'zip' command not found. Please install zip or provide a file instead of a folder."
+        exit 8
+      fi
       ZIP_NAME="$(basename -- "${src}").zip"
       ZIP_PATH="/tmp/${ZIP_NAME}"
       echo "Creating zip file: ${ZIP_PATH}"
@@ -83,10 +129,11 @@ else
 fi
 
 if [[ ${COPY_SUCCESS} -eq 1 ]]; then
-  chown root:root -- "${dst}/${base}"
+  owner_group="$(stat -c '%u:%g' "${dst}" 2>/dev/null || echo "0:0")"
+  chown "${owner_group}" -- "${dst}/${base}"
   chmod 644 -- "${dst}/${base}"
   echo
-  echo "✓ Done: ${dst}/${base} (owner root:root, mode 644)"
+  echo "✓ Done: ${dst}/${base} (owner $(stat -c '%U:%G' "${dst}/${base}" 2>/dev/null), mode 644)"
   echo
   echo "📥 Download URL (hostname): http://${host}/${base}"
   if [[ -n "${public_ip}" ]]; then
