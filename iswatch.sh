@@ -26,10 +26,30 @@ while true; do
     break
 done
 
-LOGFILE="/var/log/httpd/domains/${DOMAIN}.error.log"
+LOG_DIR="/www/wwwlogs"
 
-if [ ! -f "$LOGFILE" ]; then
-    echo -e "${RED}Log file not found:${NC} $LOGFILE"
+# لیست حالت‌های رایج نام فایل لاگ در aapanel
+CANDIDATES=(
+    "$LOG_DIR/${DOMAIN}-error_log"
+    "$LOG_DIR/${DOMAIN}.error.log"
+    "$LOG_DIR/${DOMAIN}_ols.error_log"
+    "$LOG_DIR/${DOMAIN}.log"
+)
+
+LOGFILE=""
+
+for f in "${CANDIDATES[@]}"; do
+    if [ -f "$f" ]; then
+        LOGFILE="$f"
+        break
+    fi
+done
+
+if [ -z "$LOGFILE" ]; then
+    echo -e "${RED}No log file found for domain:${NC} $DOMAIN"
+    echo -e "${YELLOW}Checked in:${NC} $LOG_DIR"
+    echo -e "${YELLOW}You can run this to see available logs:${NC}"
+    echo "  ls -l $LOG_DIR"
     exit 1
 fi
 
