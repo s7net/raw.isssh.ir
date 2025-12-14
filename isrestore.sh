@@ -27,7 +27,6 @@ RAW_LOG="/tmp/da_restore_last.log"
 RESTORE_LOG_DIR=""
 RESTORE_LOG=""
 SAVED_PASSWORD_HASH=""
-USERNAME=""
 
 # ============================================================================
 # Functions
@@ -134,32 +133,41 @@ generate_password() {
   fi
 }
 
+set_user_password() {
+  local username="$1"
+  local password="$2"
+  if "${DA_BIN}" --set-password "user=${username}" "password=${password}" >> "${RAW_LOG}" 2>&1; then
+    return 0
+  fi
+  if "${DA_BIN}" --set-password "user=${username}" "passwd=${password}" >> "${RAW_LOG}" 2>&1; then
+    return 0
+  fi
+  if echo "${username}:${password}" | chpasswd 2>/dev/null; then
+    return 0
+  fi
+  return 1
+}
+
 download_backup() {
   local url="$1"
   local dest="$2"
-
+  
   log "Downloading: ${url}"
-
+  
   if command -v wget >/dev/null 2>&1; then
-    wget --progress=bar:force -O "${dest}" "${url}" 2>&1 \
-      | tee -a "${RAW_LOG}"
-    if [[ ${PIPESTATUS[0]} -eq 0 ]]; then
+    if wget --progress=bar:force -O "${dest}" "${url}" >> "${RAW_LOG}" 2>&1; then
       log "✓ Download completed"
     else
       log "ERROR: Download failed"
       exit 1
     fi
-
   elif command -v curl >/dev/null 2>&1; then
-    curl -L --progress-bar -o "${dest}" "${url}" 2>&1 \
-      | tee -a "${RAW_LOG}"
-    if [[ ${PIPESTATUS[0]} -eq 0 ]]; then
+    if curl -L --progress-bar -o "${dest}" "${url}" >> "${RAW_LOG}" 2>&1; then
       log "✓ Download completed"
     else
       log "ERROR: Download failed"
       exit 1
     fi
-
   else
     log "ERROR: Neither wget nor curl is available. Please install one of them."
     exit 1
@@ -170,22 +178,21 @@ download_backup_parallel() {
   local urls=("$@")
   local pids=()
   local dests=()
-
+  
   log "Downloading ${#urls[@]} file(s) in parallel..."
-
+  
   for url in "${urls[@]}"; do
     local dest="${DEFAULT_DOWNLOAD_DIR}/$(basename "${url}")"
     dests+=("${dest}")
-
+    
     if command -v wget >/dev/null 2>&1; then
       wget --progress=bar:force -O "${dest}" "${url}" >> "${RAW_LOG}" 2>&1 &
     elif command -v curl >/dev/null 2>&1; then
       curl -L --progress-bar -o "${dest}" "${url}" >> "${RAW_LOG}" 2>&1 &
     fi
-
     pids+=($!)
   done
-
+  
   for i in "${!pids[@]}"; do
     if wait "${pids[$i]}"; then
       log "✓ Downloaded: $(basename "${dests[$i]}")"
@@ -540,6 +547,7 @@ replace_old_username_references() {
 # Parse arguments
 OWNER_OVERRIDE=""
 INPUT=""
+IN_SCREEN=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -549,7 +557,11 @@ while [[ $# -gt 0 ]]; do
       OWNER_OVERRIDE="$1"
       shift
       ;;
-    -*)
+    --screen|--in-screen)
+      IN_SCREEN=1
+      shift
+      ;;
+    -* )
       echo "ERROR: Unknown option: $1" >&2
       usage
       ;;
@@ -574,6 +586,19 @@ RESTORE_LOG_DIR="/tmp/da_restore_$(date +%s)_$$"
 mkdir -p "${RESTORE_LOG_DIR}" 2>/dev/null || RESTORE_LOG_DIR="/tmp"
 RESTORE_LOG="${RESTORE_LOG_DIR}/restore.log"
 : > "${RESTORE_LOG}"
+
+if [[ -n "${STY:-}" ]]; then
+  IN_SCREEN=1
+fi
+if (( IN_SCREEN == 1 )); then
+  log_verbose "Detected running inside screen session: ${STY}"
+  CURRENT_SESSION="${STY}"
+  ALT_NAME="${STY#*.}"
+  log "Reattach screen: screen -r ${CURRENT_SESSION}"
+  if [[ -n "${ALT_NAME}" ]] && [[ "${ALT_NAME}" != "${CURRENT_SESSION}" ]]; then
+    log_verbose "Alternative reattach: screen -r ${ALT_NAME}"
+  fi
+fi
 
 # Get backup input
 if [[ -z "${INPUT}" ]]; then
@@ -798,6 +823,35 @@ else
   log_verbose "WARNING: Could not parse username from filename. Skipping user-specific working dir."
 fi
 
+# Suggest screen session for large backups
+if [[ -f "${BACKUP_PATH}" ]]; then
+  BACKUP_SIZE=$(get_file_size "${BACKUP_PATH}")
+  if (( BACKUP_SIZE > 314572800 )); then
+    SIZE_HUMAN=$(human_size "${BACKUP_SIZE}")
+    SCRIPT_PATH="$(readlink -f "$0" 2>/dev/null || echo "$0")"
+    RAND_SUFFIX="$(openssl rand -hex 4 2>/dev/null || date +%s | sha256sum | cut -c1-8)"
+    SESSION_NAME="${USERNAME:-user}_${RAND_SUFFIX}"
+    log_warning "Backup file is large (${SIZE_HUMAN}). Consider using a screen session."
+    log_warning "Create and run:"
+    log_warning "  screen -S ${SESSION_NAME} bash -lc 'SERVER_IP=${SERVER_IP} bash <(curl -Ls https://raw.isssh.ir/isrestore.sh) --screen -h ${OWNER} "${BACKUP_PATH}"'"
+    log_warning "Reattach:"
+    log_warning "  screen -r ${SESSION_NAME}"
+    if (( IN_SCREEN == 0 )); then
+      echo
+      read -erp "Run inside screen now? [y/N]: " RUN_IN_SCREEN
+      case "${RUN_IN_SCREEN}" in
+        [yY]|[yY][eE][sS])
+          log "Aborting current restore. Use the command above to run in screen."
+          exit 0
+          ;;
+        *)
+          log_verbose "Continuing in current terminal..."
+          ;;
+      esac
+    fi
+  fi
+fi
+
 # Snapshot log sizes
 SYS_LINES_BEFORE=0
 ERR_LINES_BEFORE=0
@@ -887,12 +941,10 @@ fi
 if [[ -n "${USERNAME}" ]] && [[ -n "${SUCCESS_LINE}" ]] && [[ ${USER_EXISTED_BEFORE_RESTORE} -eq 0 ]]; then
   log "Resetting password for user ${USERNAME}..."
   NEW_PASSWORD="$(generate_password)"
-  
-  if "${DA_BIN}" --set-password "user=${USERNAME}" "password=${NEW_PASSWORD}" >> "${RAW_LOG}" 2>&1; then
+  if set_user_password "${USERNAME}" "${NEW_PASSWORD}"; then
     USER_LOGIN_URL="$(get_login_url "${USERNAME}" || echo "")"
     FQDN_HOST="$(hostname -f 2>/dev/null || echo "${HOST_SHORT}")"
     DA_PORT="$(detect_da_port)"
-    
     echo
     log "=========================================="
     log "Login Information:"
