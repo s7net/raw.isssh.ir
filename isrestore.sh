@@ -76,11 +76,14 @@ log_error() {
 
 usage() {
   cat <<EOF
-Usage: $0 [-h owner] <backup_file_path_or_url>
+Usage: $0 [-h owner] [--screen] [--existed-check] [--allow-restore-exist] <backup_file_path_or_url>
 
   -h owner   DirectAdmin owner/reseller to use for restore.
              If omitted, owner is derived from hostname, e.g.:
                hostname -s = lh615  -> owner = islh615
+  --screen    Indicate script runs inside a screen session (auto-detected if STY set)
+  --existed-check  Reuse existing backup in /home/admin if present; download only if missing
+  --allow-restore-exist  Skip confirmation when restoring over an existing user
 
 If no backup_file_path_or_url is given, you'll be interactively prompted.
 EOF
@@ -518,10 +521,15 @@ replace_old_username_references() {
   # Replace old username in file contents only
   while IFS= read -r file; do
     if [[ -f "${file}" ]] && [[ -r "${file}" ]] && [[ -w "${file}" ]]; then
-      if grep -q "${old_username}" "${file}" 2>/dev/null; then
-        if sed -i "s/${old_username}/${existing_user}/g" "${file}" 2>/dev/null; then
-          log_verbose "  Updated file contents: ${file}"
-          ((files_updated++))
+      if grep -Iq . "${file}" 2>/dev/null; then
+        FILE_SIZE=$(stat -c%s "${file}" 2>/dev/null || echo 0)
+        if (( FILE_SIZE <= 52428800 )); then
+          if grep -q "${old_username}" "${file}" 2>/dev/null; then
+            if sed -i "s/${old_username}/${existing_user}/g" "${file}" 2>/dev/null; then
+              log_verbose "  Updated file contents: ${file}"
+              ((files_updated++))
+            fi
+          fi
         fi
       fi
     fi
@@ -612,6 +620,12 @@ fi
 if (( IN_SCREEN == 1 )); then
   EXISTED_CHECK=1
   ALLOW_RESTORE_EXIST=1
+fi
+
+# Preflight checks
+if [[ ! -x "${DA_BIN}" ]]; then
+  log "ERROR: DirectAdmin binary not found or not executable: ${DA_BIN}"
+  exit 1
 fi
 
 # Get backup input
