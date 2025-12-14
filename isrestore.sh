@@ -549,6 +549,7 @@ OWNER_OVERRIDE=""
 INPUT=""
 IN_SCREEN=0
 EXISTED_CHECK=0
+ALLOW_RESTORE_EXIST=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -564,6 +565,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --existed-check)
       EXISTED_CHECK=1
+      shift
+      ;;
+    --allow-restore-exist)
+      ALLOW_RESTORE_EXIST=1
       shift
       ;;
     -* )
@@ -606,6 +611,7 @@ if (( IN_SCREEN == 1 )); then
 fi
 if (( IN_SCREEN == 1 )); then
   EXISTED_CHECK=1
+  ALLOW_RESTORE_EXIST=1
 fi
 
 # Get backup input
@@ -817,30 +823,38 @@ if [[ -n "${USERNAME}" ]]; then
     if [[ -n "${ORIGINAL_USERNAME}" ]] && [[ "${ORIGINAL_USERNAME}" != "${USERNAME}" ]]; then
       log_verbose "Domain ${BACKUP_DOMAIN} from backup belongs to existing user: ${USERNAME}"
       log_verbose "Backup will be restored to existing user ${USERNAME} (original backup was for ${ORIGINAL_USERNAME})"
-      echo
-      read -erp "Continue and restore backup to existing user ${USERNAME}? [y/N]: " CONFIRM
-      case "${CONFIRM}" in
-        [yY]|[yY][eE][sS])
-          log_verbose "User chose to continue restore to existing user ${USERNAME}."
-          ;;
-        *)
-          log "Restore was NOT confirmed. Aborting restore."
-          exit 0
-          ;;
-      esac
+      if (( ALLOW_RESTORE_EXIST == 1 )); then
+        log_verbose "Auto-accepted restore to existing user ${USERNAME}."
+      else
+        echo
+        read -erp "Continue and restore backup to existing user ${USERNAME}? [y/N]: " CONFIRM
+        case "${CONFIRM}" in
+          [yY]|[yY][eE][sS])
+            log_verbose "User chose to continue restore to existing user ${USERNAME}."
+            ;;
+          *)
+            log "Restore was NOT confirmed. Aborting restore."
+            exit 0
+            ;;
+        esac
+      fi
     else
       log_verbose "Detected username from backup filename: ${USERNAME} (EXISTS on this server)"
-      echo
-      read -erp "User ${USERNAME} already exists. Continue and restore over this existing user from backup? [y/N]: " CONFIRM
-      case "${CONFIRM}" in
-        [yY]|[yY][eE][sS])
-          log_verbose "User chose to continue restore and overwrite existing user ${USERNAME}."
-          ;;
-        *)
-          log "User ${USERNAME} exists and restore was NOT confirmed. Aborting restore."
-          exit 0
-          ;;
-      esac
+      if (( ALLOW_RESTORE_EXIST == 1 )); then
+        log_verbose "Auto-accepted overwrite restore for existing user ${USERNAME}."
+      else
+        echo
+        read -erp "User ${USERNAME} already exists. Continue and restore over this existing user from backup? [y/N]: " CONFIRM
+        case "${CONFIRM}" in
+          [yY]|[yY][eE][sS])
+            log_verbose "User chose to continue restore and overwrite existing user ${USERNAME}."
+            ;;
+          *)
+            log "User ${USERNAME} exists and restore was NOT confirmed. Aborting restore."
+            exit 0
+            ;;
+        esac
+      fi
     fi
   else
     log_verbose "Detected username from backup filename: ${USERNAME} (does NOT exist yet)"
@@ -860,7 +874,7 @@ if [[ -f "${BACKUP_PATH}" ]]; then
     SESSION_NAME="${USERNAME:-user}_${RAND_SUFFIX}"
     log_warning "Backup file is large (${SIZE_HUMAN}). Consider using a screen session."
     log_warning "Create and run:"
-    log_warning "  screen -S ${SESSION_NAME} bash -lc 'SERVER_IP=${SERVER_IP} bash <(curl -Ls https://raw.isssh.ir/isrestore.sh) --screen --existed-check -h ${OWNER} "${BACKUP_PATH}"'"
+    log_warning "  screen -S ${SESSION_NAME} bash -lc 'SERVER_IP=${SERVER_IP} bash <(curl -Ls https://raw.isssh.ir/isrestore.sh) --screen --existed-check --allow-restore-exist -h ${OWNER} "${BACKUP_PATH}"'"
     log_warning "Reattach:"
     log_warning "  screen -r ${SESSION_NAME}"
     if (( IN_SCREEN == 0 )); then
@@ -869,7 +883,7 @@ if [[ -f "${BACKUP_PATH}" ]]; then
       case "${RUN_IN_SCREEN}" in
         [yY]|[yY][eE][sS])
           if command -v screen >/dev/null 2>&1; then
-            if screen -dmS "${SESSION_NAME}" bash -lc "SERVER_IP=${SERVER_IP} bash <(curl -Ls https://raw.isssh.ir/isrestore.sh) --screen --existed-check -h ${OWNER} \"${BACKUP_PATH}\""; then
+            if screen -dmS "${SESSION_NAME}" bash -lc "SERVER_IP=${SERVER_IP} bash <(curl -Ls https://raw.isssh.ir/isrestore.sh) --screen --existed-check --allow-restore-exist -h ${OWNER} \"${BACKUP_PATH}\""; then
               log "Started screen session: ${SESSION_NAME}"
               log "Reattach: screen -r ${SESSION_NAME}"
               exit 0
