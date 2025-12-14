@@ -155,14 +155,14 @@ download_backup() {
   log "Downloading: ${url}"
   
   if command -v wget >/dev/null 2>&1; then
-    if wget --progress=bar:force -O "${dest}" "${url}" >> "${RAW_LOG}" 2>&1; then
+    if wget --progress=bar:force -O "${dest}" "${url}" 2>&1 | tee -a "${RAW_LOG}"; then
       log "✓ Download completed"
     else
       log "ERROR: Download failed"
       exit 1
     fi
   elif command -v curl >/dev/null 2>&1; then
-    if curl -L --progress-bar -o "${dest}" "${url}" >> "${RAW_LOG}" 2>&1; then
+    if curl -L --progress-bar -o "${dest}" "${url}" 2>&1 | tee -a "${RAW_LOG}"; then
       log "✓ Download completed"
     else
       log "ERROR: Download failed"
@@ -753,7 +753,7 @@ else
 fi
 
 # Detect username from filename (if not already set from domain check)
-if [[ -z "${USERNAME}" ]]; then
+if [[ -z "${USERNAME:-}" ]]; then
   USERNAME="$(parse_username_from_filename "${FILE_NAME}")"
 fi
 
