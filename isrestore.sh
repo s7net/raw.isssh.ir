@@ -632,7 +632,22 @@ if is_url "${INPUT}"; then
   mkdir -p "${DEFAULT_DOWNLOAD_DIR}"
   FILE_NAME="$(basename "${INPUT}")"
   BACKUP_PATH="${DEFAULT_DOWNLOAD_DIR}/${FILE_NAME}"
-  download_backup "${INPUT}" "${BACKUP_PATH}"
+  if [[ -f "${BACKUP_PATH}" ]]; then
+    LAST_DATE=$(stat -c %y "${BACKUP_PATH}" 2>/dev/null || date -r "${BACKUP_PATH}" +"%F %T" 2>/dev/null || ls -l --time-style=long-iso "${BACKUP_PATH}" | awk '{print $6, $7}')
+    log_warning "Backup already exists: ${BACKUP_PATH}"
+    log_warning "Last download: ${LAST_DATE}"
+    read -erp "Redownload backup? [y/N]: " REDOWN
+    case "${REDOWN}" in
+      [yY]|[yY][eE][sS])
+        download_backup "${INPUT}" "${BACKUP_PATH}"
+        ;;
+      *)
+        log_verbose "Using existing backup: ${BACKUP_PATH}"
+        ;;
+    esac
+  else
+    download_backup "${INPUT}" "${BACKUP_PATH}"
+  fi
 else
   if [[ "${INPUT}" = /* ]]; then
     BACKUP_PATH="${INPUT}"
