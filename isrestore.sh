@@ -548,6 +548,7 @@ replace_old_username_references() {
 OWNER_OVERRIDE=""
 INPUT=""
 IN_SCREEN=0
+EXISTED_CHECK=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -559,6 +560,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --screen|--in-screen)
       IN_SCREEN=1
+      shift
+      ;;
+    --existed-check)
+      EXISTED_CHECK=1
       shift
       ;;
     -* )
@@ -599,6 +604,9 @@ if (( IN_SCREEN == 1 )); then
     log_verbose "Alternative reattach: screen -r ${ALT_NAME}"
   fi
 fi
+if (( IN_SCREEN == 1 )); then
+  EXISTED_CHECK=1
+fi
 
 # Get backup input
 if [[ -z "${INPUT}" ]]; then
@@ -636,15 +644,19 @@ if is_url "${INPUT}"; then
     LAST_DATE=$(stat -c %y "${BACKUP_PATH}" 2>/dev/null || date -r "${BACKUP_PATH}" +"%F %T" 2>/dev/null || ls -l --time-style=long-iso "${BACKUP_PATH}" | awk '{print $6, $7}')
     log_warning "Backup already exists: ${BACKUP_PATH}"
     log_warning "Last download: ${LAST_DATE}"
-    read -erp "Redownload backup? [y/N]: " REDOWN
-    case "${REDOWN}" in
-      [yY]|[yY][eE][sS])
-        download_backup "${INPUT}" "${BACKUP_PATH}"
-        ;;
-      *)
-        log_verbose "Using existing backup: ${BACKUP_PATH}"
-        ;;
-    esac
+    if (( EXISTED_CHECK == 1 )); then
+      log_verbose "Using existing backup: ${BACKUP_PATH}"
+    else
+      read -erp "Redownload backup? [y/N]: " REDOWN
+      case "${REDOWN}" in
+        [yY]|[yY][eE][sS])
+          download_backup "${INPUT}" "${BACKUP_PATH}"
+          ;;
+        *)
+          log_verbose "Using existing backup: ${BACKUP_PATH}"
+          ;;
+      esac
+    fi
   else
     download_backup "${INPUT}" "${BACKUP_PATH}"
   fi
@@ -848,7 +860,7 @@ if [[ -f "${BACKUP_PATH}" ]]; then
     SESSION_NAME="${USERNAME:-user}_${RAND_SUFFIX}"
     log_warning "Backup file is large (${SIZE_HUMAN}). Consider using a screen session."
     log_warning "Create and run:"
-    log_warning "  screen -S ${SESSION_NAME} bash -lc 'SERVER_IP=${SERVER_IP} bash <(curl -Ls https://raw.isssh.ir/isrestore.sh) --screen -h ${OWNER} "${BACKUP_PATH}"'"
+    log_warning "  screen -S ${SESSION_NAME} bash -lc 'SERVER_IP=${SERVER_IP} bash <(curl -Ls https://raw.isssh.ir/isrestore.sh) --screen --existed-check -h ${OWNER} "${BACKUP_PATH}"'"
     log_warning "Reattach:"
     log_warning "  screen -r ${SESSION_NAME}"
     if (( IN_SCREEN == 0 )); then
@@ -856,8 +868,20 @@ if [[ -f "${BACKUP_PATH}" ]]; then
       read -erp "Run inside screen now? [y/N]: " RUN_IN_SCREEN
       case "${RUN_IN_SCREEN}" in
         [yY]|[yY][eE][sS])
-          log "Aborting current restore. Use the command above to run in screen."
-          exit 0
+          if command -v screen >/dev/null 2>&1; then
+            if screen -dmS "${SESSION_NAME}" bash -lc "SERVER_IP=${SERVER_IP} bash <(curl -Ls https://raw.isssh.ir/isrestore.sh) --screen --existed-check -h ${OWNER} \"${BACKUP_PATH}\""; then
+              log "Started screen session: ${SESSION_NAME}"
+              log "Reattach: screen -r ${SESSION_NAME}"
+              exit 0
+            else
+              log "WARNING: Failed to start screen session automatically."
+              log "Use the command above to run in screen manually."
+              exit 1
+            fi
+          else
+            log "ERROR: 'screen' is not installed. Install it or run the command above manually."
+            exit 1
+          fi
           ;;
         *)
           log_verbose "Continuing in current terminal..."
@@ -963,11 +987,8 @@ if [[ -n "${USERNAME}" ]] && [[ -n "${SUCCESS_LINE}" ]] && [[ ${USER_EXISTED_BEF
     echo
     log "=========================================="
     log "Login Information:"
-    if [[ -n "${USER_LOGIN_URL}" ]]; then
-      log "Login URL: ${USER_LOGIN_URL}"
-    else
-      log "Login URL: https://${FQDN_HOST}:${DA_PORT}"
-    fi
+    log "Login URL: https://${FQDN_HOST}:${DA_PORT}/evo"
+    log_verbose "  Also available via IP: https://${SERVER_IP}:${DA_PORT}/evo"
     log "Username: ${USERNAME}"
     log "Password: ${NEW_PASSWORD}"
     log "=========================================="
