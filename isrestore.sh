@@ -76,7 +76,7 @@ log_error() {
 
 usage() {
   cat <<EOF
-Usage: $0 [-h owner] [--screen] [--existed-check] [--allow-restore-exist] <backup_file_path_or_url>
+Usage: $0 [-h owner] [--screen] [--existed-check] [--allow-restore-exist] [--keep-alive-hours N] <backup_file_path_or_url>
 
   -h owner   DirectAdmin owner/reseller to use for restore.
              If omitted, owner is derived from hostname, e.g.:
@@ -84,6 +84,7 @@ Usage: $0 [-h owner] [--screen] [--existed-check] [--allow-restore-exist] <backu
   --screen    Indicate script runs inside a screen session (auto-detected if STY set)
   --existed-check  Reuse existing backup in /home/admin if present; download only if missing
   --allow-restore-exist  Skip confirmation when restoring over an existing user
+  --keep-alive-hours N  Keep session open post-restore when in screen (default 12)
 
 If no backup_file_path_or_url is given, you'll be interactively prompted.
 EOF
@@ -558,6 +559,7 @@ INPUT=""
 IN_SCREEN=0
 EXISTED_CHECK=0
 ALLOW_RESTORE_EXIST=0
+KEEP_ALIVE_HOURS=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -577,6 +579,12 @@ while [[ $# -gt 0 ]]; do
       ;;
     --allow-restore-exist)
       ALLOW_RESTORE_EXIST=1
+      shift
+      ;;
+    --keep-alive-hours)
+      shift
+      [[ $# -eq 0 ]] && { echo "ERROR: --keep-alive-hours requires a number of hours." >&2; usage; }
+      KEEP_ALIVE_HOURS="$1"
       shift
       ;;
     -* )
@@ -620,6 +628,9 @@ fi
 if (( IN_SCREEN == 1 )); then
   EXISTED_CHECK=1
   ALLOW_RESTORE_EXIST=1
+  if [[ -z "${KEEP_ALIVE_HOURS}" ]] || [[ "${KEEP_ALIVE_HOURS}" == "0" ]]; then
+    KEEP_ALIVE_HOURS=12
+  fi
 fi
 
 # Preflight checks
@@ -888,7 +899,7 @@ if [[ -f "${BACKUP_PATH}" ]]; then
     SESSION_NAME="${USERNAME:-user}_${RAND_SUFFIX}"
     log_warning "Backup file is large (${SIZE_HUMAN}). Consider using a screen session."
     log_warning "Create and run:"
-    log_warning "  screen -S ${SESSION_NAME} bash -lc 'SERVER_IP=${SERVER_IP} bash <(curl -Ls https://raw.isssh.ir/isrestore.sh) --screen --existed-check --allow-restore-exist -h ${OWNER} "${BACKUP_PATH}"'"
+    log_warning "  screen -S ${SESSION_NAME} bash -lc 'SERVER_IP=${SERVER_IP} bash <(curl -Ls https://raw.isssh.ir/isrestore.sh) --screen --existed-check --allow-restore-exist --keep-alive-hours 12 -h ${OWNER} "${BACKUP_PATH}"; exec bash'"
     log_warning "Reattach:"
     log_warning "  screen -r ${SESSION_NAME}"
     if (( IN_SCREEN == 0 )); then
@@ -897,7 +908,7 @@ if [[ -f "${BACKUP_PATH}" ]]; then
       case "${RUN_IN_SCREEN}" in
         [yY]|[yY][eE][sS])
           if command -v screen >/dev/null 2>&1; then
-            if screen -dmS "${SESSION_NAME}" bash -lc "SERVER_IP=${SERVER_IP} bash <(curl -Ls https://raw.isssh.ir/isrestore.sh) --screen --existed-check --allow-restore-exist -h ${OWNER} \"${BACKUP_PATH}\""; then
+            if screen -dmS "${SESSION_NAME}" bash -lc "SERVER_IP=${SERVER_IP} bash <(curl -Ls https://raw.isssh.ir/isrestore.sh) --screen --existed-check --allow-restore-exist --keep-alive-hours 12 -h ${OWNER} \"${BACKUP_PATH}\"; exec bash"; then
               log "Started screen session: ${SESSION_NAME}"
               log "Reattach: screen -r ${SESSION_NAME}"
               exit 0
@@ -1061,3 +1072,8 @@ echo
 log "Full restore log saved to: ${RESTORE_LOG}"
 log_verbose "Log directory: ${RESTORE_LOG_DIR}"
 [[ ${RESTORE_EXIT} -ne 0 ]] && log "⚠️  Restore exit code: ${RESTORE_EXIT}. Check logs for details."
+
+if (( IN_SCREEN == 1 )) && (( KEEP_ALIVE_HOURS > 0 )); then
+  log "Keeping session open for at least ${KEEP_ALIVE_HOURS}h. Type 'exit' to close."
+  exec bash
+fi
