@@ -1,35 +1,48 @@
 #!/bin/bash
 
-clear
+set -euo pipefail
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+BRIGHT_GREEN='\033[1;32m'
 NC='\033[0m'
+
+show_banner() {
+  echo -e "${BRIGHT_GREEN}"
+  cat <<'EOF'
+    _          _       __      __       __       
+   (_)____   _| |     / /___ _/ /______/ /_      
+  / / ___/  (_) | /| / / __ `/ __/ ___/ __ \     
+ / (__  )  _  | |/ |/ / /_/ / /_/ /__/ / / /     
+/_/____/  (_) |__/|__/\__,_/\__/\___/_/ /_/      
+                                                 
+EOF
+  echo -e "${NC}"
+  echo
+}
+
+log() { echo -e "${GREEN}[$(date +'%F %T')]${NC} $*"; }
+log_warning() { echo -e "${YELLOW}[$(date +'%F %T')] $*${NC}"; }
+log_error() { echo -e "${RED}[$(date +'%F %T')] $*${NC}"; }
 
 DOMAIN_REGEX='^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$'
 
+clear
+show_banner
+
 while true; do
-    read -p "Enter domain (example: isssh.ir): " DOMAIN
-
-    if [ -z "$DOMAIN" ]; then
-        echo -e "${RED}Domain cannot be empty. Please try again.${NC}"
-        continue
-    fi
-
-    if [[ ! "$DOMAIN" =~ $DOMAIN_REGEX ]]; then
-        echo -e "${RED}Invalid domain format. Example of valid format: example.com${NC}"
-        continue
-    fi
-
-    break
+  read -p "Enter domain (example: isssh.ir): " DOMAIN
+  [[ -z "$DOMAIN" ]] && { log_error "Domain cannot be empty. Please try again."; continue; }
+  if [[ ! "$DOMAIN" =~ $DOMAIN_REGEX ]]; then
+    log_error "Invalid domain format. Example of valid format: example.com"
+    continue
+  fi
+  break
 done
 
-SEARCH_DIRS=(
-    "/www/wwwlogs"
-    "/var/log/httpd/domains"
-)
+SEARCH_DIRS=("/www/wwwlogs" "/var/log/httpd/domains")
 
 LOGFILE=""
 USED_DIR=""
@@ -50,32 +63,32 @@ for dir in "${SEARCH_DIRS[@]}"; do
 done
 
 if [ -z "$LOGFILE" ]; then
-    echo -e "${RED}No log file found for domain:${NC} $DOMAIN"
-    echo -e "${YELLOW}Checked in:${NC} ${SEARCH_DIRS[*]}"
-    echo -e "${YELLOW}You can run this to see available logs:${NC}"
-    for d in "${SEARCH_DIRS[@]}"; do
-        echo "  ls -l $d"
-    done
-    exit 1
+  log_error "No log file found for domain: $DOMAIN"
+  log_warning "Checked in: ${SEARCH_DIRS[*]}"
+  log_warning "You can run these to see available logs:"
+  for d in "${SEARCH_DIRS[@]}"; do
+    echo "  ls -l $d"
+  done
+  exit 1
 fi
 
-echo -e "${GREEN}Monitoring:${NC} $LOGFILE"
+log "Monitoring: $LOGFILE"
 echo -e "${BLUE}--------------------------------------------------${NC}"
 
-trap "echo -e '\n${YELLOW}Stopped monitoring.${NC}'; exit" SIGINT
+trap "log_warning 'Stopped monitoring.'; exit" SIGINT
 
 highlight() {
-    local line="$1"
-    line=$(echo "$line" \
-        | sed -e "s/error/${RED}ERROR${NC}/Ig" \
-              -e "s/warning/${YELLOW}WARNING${NC}/Ig" \
-              -e "s/critical/${RED}CRITICAL${NC}/Ig")
-    echo -e "$line"
+  local line="$1"
+  line=$(echo "$line" \
+    | sed -e "s/error/${RED}ERROR${NC}/Ig" \
+          -e "s/warning/${YELLOW}WARNING${NC}/Ig" \
+          -e "s/critical/${RED}CRITICAL${NC}/Ig")
+  echo -e "$line"
 }
 
 tail -n 0 -f "$LOGFILE" | while read LINE; do
-    TS=$(date +"%Y-%m-%d %H:%M:%S")
-    echo -e "${GREEN}[$TS]${NC}"
-    highlight "$LINE"
-    echo -e "${BLUE}-------------------------------${NC}"
+  TS=$(date +"%Y-%m-%d %H:%M:%S")
+  echo -e "${GREEN}[$TS]${NC}"
+  highlight "$LINE"
+  echo -e "${BLUE}-------------------------------${NC}"
 done
