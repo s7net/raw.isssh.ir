@@ -51,12 +51,12 @@ fi
 chmod 644 "${ISBASHRC_PATH}" || true
 
 echo "Done. Reload with: source \"${BASHRC}\""
-echo "Reloading in 3 seconds..."
-sleep 3
+echo "Reloading in 5 seconds..."
+sleep 5
 clear
 CURRENT_USER="${USER:-$(id -un)}"
 if [[ "${CURRENT_USER}" == "${TARGET_USER}" ]]; then
-  source "${BASHRC}" || true
+  exec bash --rcfile "${BASHRC}" -i
 else
-  echo "To reload for ${TARGET_USER}: sudo -u ${TARGET_USER} bash -lc 'source ~/.bashrc'"
+  echo "To reload for ${TARGET_USER}: sudo -u ${TARGET_USER} bash -lc 'exec bash --rcfile ~/.bashrc -i'"
 fi
