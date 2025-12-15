@@ -27,16 +27,28 @@ log() { echo -e "${GREEN}[$(date +'%F %T')]${NC} $*"; }
 log_warning() { echo -e "${YELLOW}[$(date +'%F %T')] $*${NC}"; }
 log_error() { echo -e "${RED}[$(date +'%F %T')] $*${NC}"; }
 
-DOMAIN_REGEX='^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$'
+DOMAIN_REGEX='^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+'
+
+extract_domain() {
+  local input="$1"
+  local s="$input"
+  s="${s#http://}"
+  s="${s#https://}"
+  s="${s%%/*}"
+  s="${s%%:*}"
+  s="${s#.}"
+  echo "$s"
+}
 
 clear
 show_banner
 
 while true; do
-  read -p "Enter domain (example: isssh.ir): " DOMAIN
-  [[ -z "$DOMAIN" ]] && { log_error "Domain cannot be empty. Please try again."; continue; }
-  if [[ ! "$DOMAIN" =~ $DOMAIN_REGEX ]]; then
-    log_error "Invalid domain format. Example of valid format: example.com"
+  read -p "Enter domain or URL (e.g., http(s)://isssh.ir or isssh.ir): " INPUT
+  [[ -z "$INPUT" ]] && { log_error "Input cannot be empty. Please try again."; continue; }
+  DOMAIN="$(extract_domain "$INPUT")"
+  if [[ -z "$DOMAIN" ]] || [[ ! "$DOMAIN" =~ $DOMAIN_REGEX ]]; then
+    log_error "Invalid domain or URL. Examples: isssh.ir, https://isssh.ir, http://isssh.ir/path"
     continue
   fi
   break
