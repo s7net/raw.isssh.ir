@@ -26,30 +26,36 @@ while true; do
     break
 done
 
-LOG_DIR="/www/wwwlogs"
-
-# لیست حالت‌های رایج نام فایل لاگ در aapanel
-CANDIDATES=(
-    "$LOG_DIR/${DOMAIN}-error_log"
-    "$LOG_DIR/${DOMAIN}.error.log"
-    "$LOG_DIR/${DOMAIN}_ols.error_log"
-    "$LOG_DIR/${DOMAIN}.log"
+SEARCH_DIRS=(
+    "/www/wwwlogs"
+    "/var/log/httpd/domains"
 )
 
 LOGFILE=""
+USED_DIR=""
 
-for f in "${CANDIDATES[@]}"; do
-    if [ -f "$f" ]; then
-        LOGFILE="$f"
-        break
-    fi
+for dir in "${SEARCH_DIRS[@]}"; do
+    for f in \
+        "$dir/${DOMAIN}-error_log" \
+        "$dir/${DOMAIN}.error.log" \
+        "$dir/${DOMAIN}_ols.error_log" \
+        "$dir/${DOMAIN}.log"; do
+        if [ -f "$f" ]; then
+            LOGFILE="$f"
+            USED_DIR="$dir"
+            break
+        fi
+    done
+    [ -n "$LOGFILE" ] && break
 done
 
 if [ -z "$LOGFILE" ]; then
     echo -e "${RED}No log file found for domain:${NC} $DOMAIN"
-    echo -e "${YELLOW}Checked in:${NC} $LOG_DIR"
+    echo -e "${YELLOW}Checked in:${NC} ${SEARCH_DIRS[*]}"
     echo -e "${YELLOW}You can run this to see available logs:${NC}"
-    echo "  ls -l $LOG_DIR"
+    for d in "${SEARCH_DIRS[@]}"; do
+        echo "  ls -l $d"
+    done
     exit 1
 fi
 
