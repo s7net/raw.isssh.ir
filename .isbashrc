@@ -1,4 +1,3 @@
-################################################ isbashrc ################################################
 alias s="sudo ssh2"
 
 if [ -n "$SSH_CONNECTION" ]; then
@@ -136,6 +135,12 @@ command_not_found_handle() {
             sudo ssh2 "sonic${num}"
             ;;
 
+        # any name starting with 's' and no numeric suffix
+        s*[!0-9])
+            echo "→ connecting to ${cmd}..."
+            sudo ssh2 "${cmd}"
+            ;;
+
         # fallback
         *)
             echo "bash: $cmd: command not found"
@@ -143,4 +148,39 @@ command_not_found_handle() {
             ;;
     esac
 }
-##################################################################################################################
+
+isbashrc_update() {
+  local url="https://raw.isssh.ir/.isbashrc"
+  local tmp="${TMPDIR:-/tmp}/isbashrc.$$.$RANDOM"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$url" -o "$tmp"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO "$tmp" "$url"
+  else
+    echo "ERROR: curl or wget not found"
+    return 1
+  fi
+  local current_hash=""
+  local new_hash=""
+  if command -v sha256sum >/dev/null 2>&1; then
+    current_hash="$(sha256sum ~/.isbashrc 2>/dev/null | awk '{print $1}')"
+    new_hash="$(sha256sum "$tmp" 2>/dev/null | awk '{print $1}')"
+  else
+    current_hash="$(md5sum ~/.isbashrc 2>/dev/null | awk '{print $1}')"
+    new_hash="$(md5sum "$tmp" 2>/dev/null | awk '{print $1}')"
+  fi
+  if [ -n "$current_hash" ] && [ -n "$new_hash" ] && [ "$current_hash" = "$new_hash" ]; then
+    echo "Already up to date"
+    rm -f "$tmp"
+  else
+    cp "$tmp" ~/.isbashrc
+    rm -f "$tmp"
+    echo "Updated ~/.isbashrc"
+  fi
+  local line='[ -f ~/.isbashrc ] && source ~/.isbashrc'
+  if ! grep -Fq "$line" ~/.bashrc 2>/dev/null; then
+    printf "\n%s\n" "$line" >> ~/.bashrc
+    echo "Appended source line to ~/.bashrc"
+  fi
+}
+alias isbashrc-update=isbashrc_update
