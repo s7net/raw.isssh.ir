@@ -44,7 +44,7 @@ clear
 show_banner
 
 while true; do
-  read -ep "Enter domain or URL (e.g., http(s)://isssh.ir or isssh.ir): " INPUT
+  read -erp "Enter domain or URL (e.g., http(s)://isssh.ir or isssh.ir): " INPUT
   [[ -z "$INPUT" ]] && { log_error "Input cannot be empty. Please try again."; continue; }
   DOMAIN="$(extract_domain "$INPUT")"
   if [[ -z "$DOMAIN" ]] || [[ ! "$DOMAIN" =~ $DOMAIN_REGEX ]]; then
