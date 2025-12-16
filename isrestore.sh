@@ -1041,6 +1041,23 @@ elif [[ -n "${USERNAME}" ]] && [[ -z "${SUCCESS_LINE}" ]]; then
   log_verbose "Skipping password reset: No successful restore detected for user ${USERNAME}."
 fi
 
+# Backup public_html index.html if present
+if [[ -n "${USERNAME}" ]] && [[ -n "${SUCCESS_LINE}" ]]; then
+  INDEX_PATH="/home/${USERNAME}/public_html/index.html"
+  if [[ -f "${INDEX_PATH}" ]]; then
+    if [[ -f "${INDEX_PATH}-bak" ]]; then
+      TS="$(date +%Y%m%d%H%M%S)"
+      if mv "${INDEX_PATH}" "${INDEX_PATH}-bak-${TS}" 2>/dev/null; then
+        log "Backed up index.html to $(basename "${INDEX_PATH}-bak-${TS}")"
+      fi
+    else
+      if mv "${INDEX_PATH}" "${INDEX_PATH}-bak" 2>/dev/null; then
+        log "Backed up index.html to $(basename "${INDEX_PATH}-bak}")"
+      fi
+    fi
+  fi
+fi
+
 # Restore original password hash if user existed before restore
 if [[ ${USER_EXISTED_BEFORE_RESTORE} -eq 1 ]] && [[ -n "${USERNAME}" ]] && [[ -n "${SUCCESS_LINE}" ]] && [[ -n "${SAVED_PASSWORD_HASH}" ]]; then
   restore_password_hash "${USERNAME}" "${SAVED_PASSWORD_HASH}" || true
