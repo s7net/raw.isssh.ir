@@ -24,7 +24,6 @@ if [[ $EUID -ne 0 ]]; then
   exit 99
 fi
 
-clear
 show_banner
 
 read -erp "Please input path to file: " src
