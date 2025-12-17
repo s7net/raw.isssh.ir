@@ -5,9 +5,14 @@ clear
 GREEN="\e[32m"
 RESET="\e[0m"
 
-printf "%-20s | %-25s | %-8s | %-10s | %-20s\n" \
-"Name" "Domain" "Ping" "HTTP Code" "HTTP Status"
-printf "%0.s-" {1..95}
+COL_NAME=20
+COL_DOMAIN=25
+COL_CODE=10
+COL_STATUS=20
+
+printf "%-${COL_NAME}s | %-${COL_DOMAIN}s | %-${COL_CODE}s | %-${COL_STATUS}s\n" \
+"Name" "Domain" "HTTP Code" "HTTP Status"
+printf "%0.s-" {1..85}
 echo
 
 gateways=(
@@ -49,21 +54,20 @@ for item in "${gateways[@]}"; do
   name=$(awk '{print $1}' <<< "$item")
   domain=$(awk '{print $2}' <<< "$item")
 
-  ping -c 2 -W 1 "$domain" > /dev/null 2>&1 \
-    && ping_status="✅" || ping_status="❌"
-
   http_code=$(curl -o /dev/null -s -w "%{http_code}" \
     --connect-timeout 3 --max-time 5 \
     "https://$domain")
 
   http_status=$(http_status_text "$http_code")
 
+  printf -v name_plain "%-${COL_NAME}s" "$name"
+
   if [[ "$http_code" =~ ^2 ]]; then
-    name_display="${GREEN}${name}${RESET}"
+    name_display="${GREEN}${name_plain}${RESET}"
   else
-    name_display="$name"
+    name_display="$name_plain"
   fi
 
-  printf "%-20s | %-25s | %-8s | %-10s | %-20s\n" \
-    "$name_display" "$domain" "$ping_status" "$http_code" "$http_status"
+  printf "%s | %-${COL_DOMAIN}s | %-${COL_CODE}s | %-${COL_STATUS}s\n" \
+    "$name_display" "$domain" "$http_code" "$http_status"
 done
