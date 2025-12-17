@@ -2,6 +2,9 @@
 
 clear
 
+GREEN="\e[32m"
+RESET="\e[0m"
+
 printf "%-20s | %-25s | %-8s | %-10s | %-20s\n" \
 "Name" "Domain" "Ping" "HTTP Code" "HTTP Status"
 printf "%0.s-" {1..95}
@@ -25,13 +28,8 @@ gateways=(
 
 http_status_text() {
   case "$1" in
-    200) echo "OK" ;;
-    201) echo "CREATED" ;;
-    204) echo "NO_CONTENT" ;;
-    301) echo "MOVED_PERMANENTLY" ;;
-    302) echo "FOUND" ;;
-    307) echo "TEMP_REDIRECT" ;;
-    308) echo "PERM_REDIRECT" ;;
+    2*) echo "SUCCESS" ;;
+    301|302|307|308) echo "REDIRECT" ;;
     400) echo "BAD_REQUEST" ;;
     401) echo "UNAUTHORIZED" ;;
     403) echo "FORBIDDEN" ;;
@@ -60,6 +58,12 @@ for item in "${gateways[@]}"; do
 
   http_status=$(http_status_text "$http_code")
 
+  if [[ "$http_code" =~ ^2 ]]; then
+    name_display="${GREEN}${name}${RESET}"
+  else
+    name_display="$name"
+  fi
+
   printf "%-20s | %-25s | %-8s | %-10s | %-20s\n" \
-    "$name" "$domain" "$ping_status" "$http_code" "$http_status"
+    "$name_display" "$domain" "$ping_status" "$http_code" "$http_status"
 done
