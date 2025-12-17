@@ -8,11 +8,11 @@ RESET="\e[0m"
 COL_NAME=20
 COL_DOMAIN=25
 COL_CODE=10
-COL_STATUS=20
+COL_STATUS=22
 
 printf "%-${COL_NAME}s | %-${COL_DOMAIN}s | %-${COL_CODE}s | %-${COL_STATUS}s\n" \
 "Name" "Domain" "HTTP Code" "HTTP Status"
-printf "%0.s-" {1..85}
+printf "%0.s-" {1..90}
 echo
 
 gateways=(
@@ -34,7 +34,7 @@ gateways=(
 http_status_text() {
   case "$1" in
     2*) echo "SUCCESS" ;;
-    301|302|307|308) echo "REDIRECT" ;;
+    301|302|303|307|308) echo "SUCCESS (REDIRECT)" ;;
     400) echo "BAD_REQUEST" ;;
     401) echo "UNAUTHORIZED" ;;
     403) echo "FORBIDDEN" ;;
@@ -62,7 +62,7 @@ for item in "${gateways[@]}"; do
 
   printf -v name_plain "%-${COL_NAME}s" "$name"
 
-  if [[ "$http_code" =~ ^2 ]]; then
+  if [[ "$http_code" =~ ^2|^3 ]]; then
     name_display="${GREEN}${name_plain}${RESET}"
   else
     name_display="$name_plain"
