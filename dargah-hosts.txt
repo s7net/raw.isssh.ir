@@ -1,0 +1,32 @@
+############   All payment gateways   ############
+###  IranKish  ###
+185.116.160.67 ikc.shaparak.ir
+###  BehPardakht Mellat  ###
+185.116.160.112 bpm.shaparak.ir
+###  Parsian  ###
+193.141.65.114 pec.shaparak.ir
+###  Sadad Melli  ###
+193.141.65.223 sadad.shaparak.ir
+###  Pasargad  ###
+193.141.65.113 pep.shaparak.ir
+###  Saman Kish  ###
+193.141.65.225 sep.shaparak.ir
+###  Pardakht Novim  ###
+193.141.65.61 pna.shaparak.ir
+###  Sepehr Saderat  ###
+193.141.65.61 sepehr.shaparak.ir
+###  omid pay  ###
+193.141.65.61 say.shaparak.ir
+###  Asan Pardakht  ###
+193.141.65.61 asan.shaparak.ir
+###  Refah  ###
+193.141.65.61 ref.sayancard.ir
+###  FanAva  ###
+193.141.65.61 FCP.shaparak.ir
+###  snapppay  ###
+193.141.65.61 api.snapppay.ir
+###  zarinpal  ###
+193.141.65.61 payment.zarinpal.com
+###  tara360  ###
+193.141.65.61 pay.tara360.ir
+############   All payment gateways   ############
