@@ -20,7 +20,7 @@ gateways=(
   "Refah_Bank ref.sayancard.ir"
   "Ghesta api.ghesta.ir"
   "OmidPay say.shaparak.ir"
-  "Zarinpal payment.zarinpal.com"
+  "Zarinpal www.zarinpal.com"
   "IranKish ikc.shaparak.ir"
   "BehPardakht bpm.shaparak.ir"
   "Parsian pec.shaparak.ir"
@@ -71,3 +71,14 @@ for item in "${gateways[@]}"; do
   printf "%b | %-${COL_DOMAIN}s | %-${COL_CODE}s | %-${COL_STATUS}s\n" \
     "$name_display" "$domain" "$http_code" "$http_status"
 done
+
+echo
+echo "Reminder:"
+echo "If a payment gateway is not accessible, you can whitelist your server IP using the following page:"
+echo "https://dargah.isvip.ir"
+echo
+echo "After whitelisting, add the contents of the following URL to your /etc/hosts file:"
+echo "https://raw.isssh.ir/dargah-hosts.txt"
+echo
+echo "Note:"
+echo "On shared hosting servers, the default sec-check configuration usually adds these entries automatically."
