@@ -68,6 +68,6 @@ for item in "${gateways[@]}"; do
     name_display="$name_plain"
   fi
 
-  printf "%s | %-${COL_DOMAIN}s | %-${COL_CODE}s | %-${COL_STATUS}s\n" \
+  printf "%b | %-${COL_DOMAIN}s | %-${COL_CODE}s | %-${COL_STATUS}s\n" \
     "$name_display" "$domain" "$http_code" "$http_status"
 done
