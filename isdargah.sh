@@ -20,7 +20,7 @@ gateways=(
   "Refah_Bank ref.sayancard.ir"
   "Ghesta api.ghesta.ir"
   "OmidPay say.shaparak.ir"
-  "Zarinpal next.zarinpal.com"
+  "Zarinpal www.zarinpal.com"
   "IranKish ikc.shaparak.ir"
   "BehPardakht bpm.shaparak.ir"
   "Parsian pec.shaparak.ir"
