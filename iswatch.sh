@@ -11,7 +11,7 @@ BRIGHT_GREEN='\033[1;32m'
 NC='\033[0m'
 
 show_banner() {
-  echo -e "${BRIGHT_GREEN}"
+  echo -e "${RED}"
   cat <<'EOF'
     _          _       __      __       __       
    (_)____   _| |     / /___ _/ /______/ /_      
