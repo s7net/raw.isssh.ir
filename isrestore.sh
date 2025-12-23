@@ -942,9 +942,67 @@ if is_url "${INPUT}"; then
   fi
 else
   if [[ "${INPUT}" = /* ]]; then
+    # Absolute path provided
     BACKUP_PATH="${INPUT}"
-  else
+  elif [[ -f "${INPUT}" ]]; then
+    # File exists in current directory
     BACKUP_PATH="$(pwd)/${INPUT}"
+  else
+    # Search for file in common backup locations
+    log_verbose "Searching for backup file: ${INPUT}"
+    FOUND_BACKUP=""
+    
+    # Search paths in order of preference
+    SEARCH_PATHS=(
+      "/home/admin"
+      "$(pwd)"
+      "/tmp"
+      "/var/backups"
+      "/backup"
+    )
+    
+    for search_path in "${SEARCH_PATHS[@]}"; do
+      if [[ -f "${search_path}/${INPUT}" ]]; then
+        FOUND_BACKUP="${search_path}/${INPUT}"
+        log_verbose "Found backup file: ${FOUND_BACKUP}"
+        break
+      fi
+    done
+    
+    if [[ -n "${FOUND_BACKUP}" ]]; then
+      BACKUP_PATH="${FOUND_BACKUP}"
+    else
+      # If not found, try fuzzy search for similar filenames
+      log_verbose "Exact match not found. Searching for similar files..."
+      
+      for search_path in "${SEARCH_PATHS[@]}"; do
+        if [[ -d "${search_path}" ]]; then
+          # Look for files containing the input as substring
+          SIMILAR_FILES=($(find "${search_path}" -maxdepth 1 -name "*${INPUT}*" -type f 2>/dev/null))
+          
+          if [[ ${#SIMILAR_FILES[@]} -eq 1 ]]; then
+            BACKUP_PATH="${SIMILAR_FILES[0]}"
+            log "Found similar file: $(basename "${BACKUP_PATH}") in ${search_path}"
+            break
+          elif [[ ${#SIMILAR_FILES[@]} -gt 1 ]]; then
+            echo "Multiple similar files found in ${search_path}:"
+            for i in "${!SIMILAR_FILES[@]}"; do
+              echo "  [$((i+1))] $(basename "${SIMILAR_FILES[$i]}")"
+            done
+            read -erp "Select file [1-${#SIMILAR_FILES[@]}] or press Enter to continue searching: " CHOICE
+            if [[ -n "${CHOICE}" ]] && [[ "${CHOICE}" =~ ^[0-9]+$ ]] && (( CHOICE >= 1 && CHOICE <= ${#SIMILAR_FILES[@]} )); then
+              BACKUP_PATH="${SIMILAR_FILES[$((CHOICE-1))]}"
+              break
+            fi
+          fi
+        fi
+      done
+      
+      # If still not found, use original input as relative path
+      if [[ -z "${BACKUP_PATH}" ]]; then
+        BACKUP_PATH="$(pwd)/${INPUT}"
+      fi
+    fi
   fi
   log_verbose "Detected local file input: ${BACKUP_PATH}"
 fi
