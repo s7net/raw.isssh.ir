@@ -228,7 +228,7 @@ show_active_sessions() {
             ;;
           [nN]|[nN][eE][wW])
             log_verbose "User chose to start new restore session."
-            return 1
+            return 0
             ;;
           [qQ]|[qQ][uU][iI][tT])
             log "Exiting script."
@@ -240,10 +240,15 @@ show_active_sessions() {
             ;;
         esac
       done
+    else
+      # No active sessions found
+      log_verbose "No active isrestore sessions found."
+      return 0
     fi
+  else
+    log_verbose "Screen command not available."
+    return 0
   fi
-  
-  return 1
 }
 
 get_session_backup_path() {
@@ -852,6 +857,12 @@ show_banner
 # Show active isrestore sessions if any exist
 show_active_sessions
 
+# Get backup input
+if [[ -z "${INPUT}" ]]; then
+  read -erp "Enter backup file path or URL: " INPUT
+  [[ -z "${INPUT}" ]] && { echo "No input provided. Exiting."; exit 1; }
+fi
+
 # Create restore log directory
 RESTORE_LOG_DIR="/tmp/da_restore_$(date +%s)_$$"
 mkdir -p "${RESTORE_LOG_DIR}" 2>/dev/null || RESTORE_LOG_DIR="/tmp"
@@ -882,12 +893,6 @@ fi
 if [[ ! -x "${DA_BIN}" ]]; then
   log "ERROR: DirectAdmin binary not found or not executable: ${DA_BIN}"
   exit 1
-fi
-
-# Get backup input
-if [[ -z "${INPUT}" ]]; then
-  read -erp "Enter backup file path or URL: " INPUT
-  [[ -z "${INPUT}" ]] && { echo "No input provided. Exiting."; exit 1; }
 fi
 
 log "DirectAdmin auto-restore starting..."
