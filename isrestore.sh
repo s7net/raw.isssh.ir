@@ -105,6 +105,249 @@ EOF
   echo
 }
 
+show_active_sessions() {
+  local sessions
+  local session_count=0
+  declare -a session_array
+  declare -a pid_array
+  declare -a name_array
+  declare -a user_array
+  
+  # Get all screen sessions with isrestore prefix
+  if command -v screen >/dev/null 2>&1; then
+    sessions=$(screen -ls 2>/dev/null | grep -E "isrestore_" || true)
+    
+    if [[ -n "${sessions}" ]]; then
+      # Parse sessions into arrays
+      while IFS= read -r line; do
+        if [[ -n "${line}" ]]; then
+          local pid_session=$(echo "${line}" | awk '{print $1}')
+          local status=$(echo "${line}" | grep -o '([^)]*)')
+          local pid="${pid_session%%.*}"
+          local session_name="${pid_session#*.}"
+          local username=""
+          local created=""
+          
+          # Extract username from session name (isrestore_username_randomid)
+          if [[ "${session_name}" =~ isrestore_([^_]+)_ ]]; then
+            username="${BASH_REMATCH[1]}"
+          fi
+          
+          # Get process creation time
+          if [[ -n "${pid}" ]] && [[ "${pid}" =~ ^[0-9]+$ ]]; then
+            created=$(ps -o lstart= -p "${pid}" 2>/dev/null | awk '{print $2, $3, $4}' || echo "unknown")
+          fi
+          
+          session_array+=("${line}")
+          pid_array+=("${pid}")
+          name_array+=("${session_name}")
+          user_array+=("${username:-unknown}")
+          ((session_count++))
+        fi
+      done <<< "${sessions}"
+      
+      echo
+      log "Found ${session_count} active isrestore session(s):"
+      echo
+      printf "%-4s %-8s %-25s %-12s %-15s %s\n" "#" "PID" "SESSION NAME" "STATUS" "USER" "CREATED"
+      printf "%-4s %-8s %-25s %-12s %-15s %s\n" "---" "----" "-------------------------" "------------" "---------------" "-------"
+      
+      for i in "${!session_array[@]}"; do
+        local line="${session_array[$i]}"
+        local pid_session=$(echo "${line}" | awk '{print $1}')
+        local status=$(echo "${line}" | grep -o '([^)]*)')
+        local pid="${pid_array[$i]}"
+        local session_name="${name_array[$i]}"
+        local username="${user_array[$i]}"
+        local created=""
+        
+        if [[ -n "${pid}" ]] && [[ "${pid}" =~ ^[0-9]+$ ]]; then
+          created=$(ps -o lstart= -p "${pid}" 2>/dev/null | awk '{print $2, $3, $4}' || echo "unknown")
+        fi
+        
+        printf "%-4s %-8s %-25s %-12s %-15s %s\n" "$((i+1))" "${pid}" "${session_name}" "${status}" "${username}" "${created:-unknown}"
+      done
+      
+      echo
+      echo "Options:"
+      echo "  [1-${session_count}] - Select session by number"
+      echo "  [n/new]  - Start new restore session"
+      echo "  [q/quit] - Exit script"
+      echo
+      
+      while true; do
+        read -erp "Select option: " CHOICE
+        
+        case "${CHOICE}" in
+          [1-9]|[1-9][0-9])
+            if (( CHOICE >= 1 && CHOICE <= session_count )); then
+              local selected_idx=$((CHOICE - 1))
+              local selected_session="${name_array[$selected_idx]}"
+              local selected_user="${user_array[$selected_idx]}"
+              
+              echo
+              echo "Selected session: ${selected_session}"
+              echo "User: ${selected_user}"
+              echo
+              echo "Actions:"
+              echo "  [1] Attach to session"
+              echo "  [2] Get backup file path"
+              echo "  [3] Get download link"
+              echo "  [4] Back to session list"
+              echo
+              
+              read -erp "Select action [1-4]: " ACTION
+              
+              case "${ACTION}" in
+                1)
+                  log "Attaching to session: ${selected_session}"
+                  exec screen -r "${selected_session}"
+                  ;;
+                2)
+                  get_session_backup_path "${selected_user}"
+                  ;;
+                3)
+                  get_session_download_link "${selected_user}"
+                  ;;
+                4)
+                  continue
+                  ;;
+                *)
+                  echo "Invalid action. Please select 1-4."
+                  continue
+                  ;;
+              esac
+              
+              echo
+              read -erp "Press Enter to continue or Ctrl+C to exit..."
+              return 1
+            else
+              echo "Invalid selection. Please choose 1-${session_count}."
+              continue
+            fi
+            ;;
+          [nN]|[nN][eE][wW])
+            log_verbose "User chose to start new restore session."
+            return 1
+            ;;
+          [qQ]|[qQ][uU][iI][tT])
+            log "Exiting script."
+            exit 0
+            ;;
+          *)
+            echo "Invalid option. Please select 1-${session_count}, 'n' for new, or 'q' to quit."
+            continue
+            ;;
+        esac
+      done
+    fi
+  fi
+  
+  return 1
+}
+
+get_session_backup_path() {
+  local username="$1"
+  local backup_files=()
+  
+  echo "Searching for backup files for user: ${username}"
+  
+  # Search common backup locations
+  local search_paths=(
+    "/home/admin"
+    "/tmp"
+    "/var/backups"
+    "/backup"
+  )
+  
+  for path in "${search_paths[@]}"; do
+    if [[ -d "${path}" ]]; then
+      while IFS= read -r -d '' file; do
+        backup_files+=("${file}")
+      done < <(find "${path}" -maxdepth 2 -name "*${username}*" -type f \( -name "*.tar.zst" -o -name "*.tar.gz" -o -name "*.tar" \) -print0 2>/dev/null)
+    fi
+  done
+  
+  if [[ ${#backup_files[@]} -eq 0 ]]; then
+    echo "No backup files found for user: ${username}"
+    return 1
+  fi
+  
+  echo
+  echo "Found backup files:"
+  for i in "${!backup_files[@]}"; do
+    local file="${backup_files[$i]}"
+    local size=$(get_file_size "${file}" 2>/dev/null || echo "0")
+    local size_human=$(human_size "${size}")
+    local modified=$(stat -c %y "${file}" 2>/dev/null | cut -d' ' -f1,2 | cut -d'.' -f1 || echo "unknown")
+    
+    printf "  [%d] %s\n" "$((i+1))" "$(basename "${file}")"
+    printf "      Path: %s\n" "${file}"
+    printf "      Size: %s\n" "${size_human}"
+    printf "      Modified: %s\n" "${modified}"
+    echo
+  done
+}
+
+get_session_download_link() {
+  local username="$1"
+  local backup_files=()
+  
+  echo "Searching for backup files for user: ${username}"
+  
+  # Search web-accessible directories
+  local web_paths=(
+    "/var/www/html"
+    "/www/wwwroot/default"
+    "/home/admin"
+  )
+  
+  for path in "${web_paths[@]}"; do
+    if [[ -d "${path}" ]]; then
+      while IFS= read -r -d '' file; do
+        backup_files+=("${file}")
+      done < <(find "${path}" -maxdepth 2 -name "*${username}*" -type f \( -name "*.tar.zst" -o -name "*.tar.gz" -o -name "*.tar" \) -print0 2>/dev/null)
+    fi
+  done
+  
+  if [[ ${#backup_files[@]} -eq 0 ]]; then
+    echo "No web-accessible backup files found for user: ${username}"
+    echo "You may need to copy the backup file to a web directory first."
+    return 1
+  fi
+  
+  echo
+  echo "Available download links:"
+  
+  for i in "${!backup_files[@]}"; do
+    local file="${backup_files[$i]}"
+    local filename=$(basename "${file}")
+    local size=$(get_file_size "${file}" 2>/dev/null || echo "0")
+    local size_human=$(human_size "${size}")
+    
+    # Determine web path
+    local web_url=""
+    if [[ "${file}" == /var/www/html/* ]]; then
+      web_url="http://${FQDN_HOST}/${filename}"
+    elif [[ "${file}" == /www/wwwroot/default/* ]]; then
+      web_url="http://${FQDN_HOST}/${filename}"
+    elif [[ "${file}" == /home/admin/* ]]; then
+      echo "  Note: ${filename} is in /home/admin (not web-accessible)"
+      echo "        Copy to web directory first: cp \"${file}\" /var/www/html/"
+      continue
+    fi
+    
+    if [[ -n "${web_url}" ]]; then
+      printf "  [%d] %s (%s)\n" "$((i+1))" "${filename}" "${size_human}"
+      printf "      %s\n" "${web_url}"
+      if [[ -n "${SERVER_IP}" ]]; then
+        printf "      %s\n" "http://${SERVER_IP}/${filename}"
+      fi
+      echo
+    fi
+  done
+}
+
 log() {
   local msg="[$(date +'%F %T')] $*"
   echo "${msg}" >&2
@@ -606,6 +849,9 @@ done
 clear
 show_banner
 
+# Show active isrestore sessions if any exist
+show_active_sessions
+
 # Create restore log directory
 RESTORE_LOG_DIR="/tmp/da_restore_$(date +%s)_$$"
 mkdir -p "${RESTORE_LOG_DIR}" 2>/dev/null || RESTORE_LOG_DIR="/tmp"
@@ -919,7 +1165,7 @@ if [[ -f "${BACKUP_PATH}" ]]; then
     SIZE_HUMAN=$(human_size "${BACKUP_SIZE}")
     SCRIPT_PATH="$(readlink -f "$0" 2>/dev/null || echo "$0")"
     RAND_SUFFIX="$(openssl rand -hex 4 2>/dev/null || date +%s | sha256sum | cut -c1-8)"
-    SESSION_NAME="${USERNAME:-user}_${RAND_SUFFIX}"
+    SESSION_NAME="isrestore_${USERNAME:-user}_${RAND_SUFFIX}"
     log_warning "Backup file is large (${SIZE_HUMAN}). Consider using a screen session."
     log_warning "Create and run:"
     log_warning "  screen -S ${SESSION_NAME} bash -lc 'SERVER_IP=${SERVER_IP} bash <(curl -Ls https://raw.isssh.ir/isrestore.sh) --screen --existed-check --allow-restore-exist --keep-alive-hours ${DEFAULT_KEEP_ALIVE_HOURS} -h ${OWNER} \"${BACKUP_PATH}\"; exec bash'"
