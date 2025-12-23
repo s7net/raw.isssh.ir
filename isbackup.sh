@@ -193,7 +193,7 @@ BASE="$(basename -- "${SRC}")"
 echo "Copying file to web directory..."
 FILE_SIZE=$(stat -c%s "${SRC}" 2>/dev/null || stat -f%z "${SRC}" 2>/dev/null || echo 0)
 
-ifif command -v rsync >/dev/null 2>&1; then
+if command -v rsync >/dev/null 2>&1; then
   if sudo rsync -aW --inplace --no-compress --info=progress2 \
     "${SRC}" "${DST}/${BASE}"; then
     COPY_SUCCESS=1
