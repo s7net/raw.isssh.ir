@@ -1,18 +1,9 @@
 #!/bin/bash
 set -e
 
-echo "[+] Detecting Docker download availability..."
+echo "[+] Installing Docker using proxy only"
 
-DOCKER_OFFICIAL="https://download.docker.com"
-DOCKER_PROXY="https://download-docker.isssh.ir"
-
-if curl -fsSL --max-time 5 "$DOCKER_OFFICIAL/linux/ubuntu/gpg" > /dev/null; then
-  echo "[✓] Official Docker reachable"
-  DOCKER_BASE="$DOCKER_OFFICIAL"
-else
-  echo "[!] Official Docker blocked, using proxy"
-  DOCKER_BASE="$DOCKER_PROXY"
-fi
+DOCKER_BASE="https://download-docker.isssh.ir"
 
 echo "[+] Using Docker base URL: $DOCKER_BASE"
 
