@@ -28,6 +28,35 @@ RESTORE_LOG_DIR=""
 RESTORE_LOG=""
 SAVED_PASSWORD_HASH=""
 
+# Constants
+readonly LARGE_BACKUP_THRESHOLD=314572800  # 300MB
+readonly MAX_FILE_SIZE_FOR_REPLACEMENT=52428800  # 50MB
+readonly SIZE_THRESHOLD_MB=10
+readonly DEFAULT_KEEP_ALIVE_HOURS=12
+readonly DEFAULT_DA_PORT=2222
+
+# Cache frequently used values
+HOST_SHORT=""
+FQDN_HOST=""
+SERVER_IP=""
+DA_PORT=""
+
+# ============================================================================
+# Initialization and Caching
+# ============================================================================
+
+init_cached_values() {
+  # Cache hostname values to avoid repeated calls
+  HOST_SHORT="$(hostname -s 2>/dev/null || hostname)"
+  FQDN_HOST="$(hostname -f 2>/dev/null || echo "${HOST_SHORT}")"
+  
+  # Cache server IP
+  SERVER_IP="${SERVER_IP:-$(detect_server_ip || echo "")}"
+  
+  # Cache DA port
+  DA_PORT="$(detect_da_port)"
+}
+
 # ============================================================================
 # Functions
 # ============================================================================
@@ -115,7 +144,7 @@ detect_da_port() {
   fi
   
   # Fallback to default port
-  echo "2222"
+  echo "${DEFAULT_DA_PORT}"
 }
 
 human_size() {
@@ -302,17 +331,19 @@ get_login_url() {
 check_disk_space() {
   local backup_path="$1"
   local backup_size
+  local backup_dir
   local avail_kb
   local avail_bytes
   local recommended_bytes
   
   backup_size=$(get_file_size "${backup_path}")
-  avail_kb=$(df -Pk "$(dirname "${backup_path}")" | awk 'NR==2 {print $4}')
+  backup_dir="$(dirname "${backup_path}")"
+  avail_kb=$(df -Pk "${backup_dir}" | awk 'NR==2 {print $4}')
   avail_bytes=$((avail_kb * 1024))
   recommended_bytes=$((backup_size * 2))
   
   log_verbose "Backup size:      $(human_size "${backup_size}")"
-  log_verbose "Free disk space:  $(human_size "${avail_bytes}") on filesystem of $(dirname "${backup_path}")"
+  log_verbose "Free disk space:  $(human_size "${avail_bytes}") on filesystem of ${backup_dir}"
   log_verbose "Recommended free: $(human_size "${recommended_bytes}") (2x backup size)"
   
   if (( avail_bytes < recommended_bytes )); then
@@ -342,27 +373,11 @@ setup_restore_workdir() {
 
 extract_domain_from_backup() {
   local backup_path="$1"
-  local backup_filename
-  backup_filename="$(basename "${backup_path}")"
   local backup_abs_path
   backup_abs_path="$(readlink -f "${backup_path}" 2>/dev/null || echo "${backup_path}")"
-  local username=""
-  local random_str
-  random_str="$(openssl rand -hex 8 2>/dev/null || date +%s | sha256sum | cut -c1-16)"
-  local temp_dir=""
-  local user_conf=""
   local domain=""
   
-  username="$(parse_username_from_filename "${backup_filename}")"
-  if [[ -z "${username}" ]]; then
-    username="unknown"
-  fi
-  
-  temp_dir="/tmp/${username}_${random_str}"
-  user_conf="${temp_dir}/backup/user.conf"
-  
-  log_verbose "Extracting domain from backup (reading backup/user.conf)..."
-  log_verbose "  Temporary directory: ${temp_dir}"
+  log_verbose "Extracting domain from backup (reading domain= line from backup/user.conf)..."
   
   if [[ ! -f "${backup_path}" ]]; then
     log "ERROR: Backup file does not exist: ${backup_path}"
@@ -374,83 +389,28 @@ extract_domain_from_backup() {
     return 1
   fi
   
-  if ! mkdir -p "${temp_dir}" 2>/dev/null; then
-    log "ERROR: Failed to create temporary directory: ${temp_dir}"
-    return 1
-  fi
-  
-  if [[ ! -d "${temp_dir}" ]]; then
-    log "ERROR: Temporary directory was not created: ${temp_dir}"
-    return 1
-  fi
-  
+  # Extract only the domain line directly from the archive without creating temp files
   if [[ "${backup_path}" == *.zst ]]; then
     if ! command -v zstd >/dev/null 2>&1; then
       log "WARNING: zstd not found. Cannot extract domain from .zst backup."
-      rm -rf "${temp_dir}" 2>/dev/null || true
       return 1
     fi
-    cd "${temp_dir}" || { log "ERROR: Failed to change to temp directory ${temp_dir}"; rm -rf "${temp_dir}" 2>/dev/null || true; return 1; }
-    EXTRACT_OUTPUT=$(tar -I zstd -xf "${backup_abs_path}" backup/user.conf 2>&1 || true)
-    EXTRACT_EXIT=$?
-    cd - >/dev/null 2>&1 || true
-    echo "${EXTRACT_OUTPUT}" >> "${RAW_LOG}"
-    
-    if [[ ${EXTRACT_EXIT} -eq 0 ]]; then
-      if [[ -f "${user_conf}" ]]; then
-        domain=$(grep -E '^domain=' "${user_conf}" 2>/dev/null | cut -d'=' -f2 | tr -d ' ' | head -n1)
-      else
-        log "WARNING: backup/user.conf not found in archive after extraction"
-      fi
-    else
-      log "ERROR: Failed to extract backup/user.conf from .zst archive (exit code: ${EXTRACT_EXIT})"
-    fi
+    domain=$(tar -I zstd -xOf "${backup_abs_path}" backup/user.conf 2>/dev/null | grep -E '^domain=' | cut -d'=' -f2 | tr -d ' ' | head -n1 || true)
   elif [[ "${backup_path}" == *.tar.gz ]] || [[ "${backup_path}" == *.tgz ]]; then
-    cd "${temp_dir}" || { log "ERROR: Failed to change to temp directory ${temp_dir}"; rm -rf "${temp_dir}" 2>/dev/null || true; return 1; }
-    EXTRACT_OUTPUT=$(tar -xzf "${backup_abs_path}" backup/user.conf 2>&1 || true)
-    EXTRACT_EXIT=$?
-    cd - >/dev/null 2>&1 || true
-    echo "${EXTRACT_OUTPUT}" >> "${RAW_LOG}"
-    
-    if [[ ${EXTRACT_EXIT} -eq 0 ]]; then
-      if [[ -f "${user_conf}" ]]; then
-        domain=$(grep -E '^domain=' "${user_conf}" 2>/dev/null | cut -d'=' -f2 | tr -d ' ' | head -n1)
-      else
-        log "WARNING: backup/user.conf not found in archive after extraction"
-      fi
-    else
-      log "ERROR: Failed to extract backup/user.conf from .tar.gz archive (exit code: ${EXTRACT_EXIT})"
-    fi
+    domain=$(tar -xzOf "${backup_abs_path}" backup/user.conf 2>/dev/null | grep -E '^domain=' | cut -d'=' -f2 | tr -d ' ' | head -n1 || true)
   elif [[ "${backup_path}" == *.tar ]]; then
-    cd "${temp_dir}" || { log "ERROR: Failed to change to temp directory ${temp_dir}"; rm -rf "${temp_dir}" 2>/dev/null || true; return 1; }
-    EXTRACT_OUTPUT=$(tar -xf "${backup_abs_path}" backup/user.conf 2>&1 || true)
-    EXTRACT_EXIT=$?
-    cd - >/dev/null 2>&1 || true
-    echo "${EXTRACT_OUTPUT}" >> "${RAW_LOG}"
-    
-    if [[ ${EXTRACT_EXIT} -eq 0 ]]; then
-      if [[ -f "${user_conf}" ]]; then
-        domain=$(grep -E '^domain=' "${user_conf}" 2>/dev/null | cut -d'=' -f2 | tr -d ' ' | head -n1)
-      else
-        log "WARNING: backup/user.conf not found in archive after extraction"
-      fi
-    else
-      log "ERROR: Failed to extract backup/user.conf from .tar archive (exit code: ${EXTRACT_EXIT})"
-    fi
+    domain=$(tar -xOf "${backup_abs_path}" backup/user.conf 2>/dev/null | grep -E '^domain=' | cut -d'=' -f2 | tr -d ' ' | head -n1 || true)
   else
     log "WARNING: Unknown backup format. Cannot extract domain."
+    return 1
   fi
   
   if [[ -n "${domain}" ]]; then
     log_verbose "  Domain extracted successfully: ${domain}"
-    log_verbose "  Temporary directory: ${temp_dir}"
     echo "${domain}" >&1
-    rm -rf "${temp_dir}" 2>/dev/null || true
     return 0
   else
-    log_verbose "  Failed to extract domain. Temporary directory: ${temp_dir}"
-    log_verbose "  You can manually check: ${user_conf}"
-    rm -rf "${temp_dir}" 2>/dev/null || true
+    log_verbose "  Failed to extract domain from backup/user.conf"
     return 1
   fi
 }
