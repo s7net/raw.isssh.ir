@@ -19,6 +19,45 @@ EOF
   echo
 }
 
+detect_public_ip() {
+  local ip=""
+  local services=(
+    "https://api.isssh.ir/tools/myip.php"
+    "https://api.ipify.org"
+    "https://ipv4.icanhazip.com"
+    "https://checkip.amazonaws.com"
+    "https://ipecho.net/plain"
+    "https://myexternalip.com/raw"
+    "https://wtfismyip.com/text"
+    "http://whatismyip.akamai.com"
+  )
+  
+  for service in "${services[@]}"; do
+    if command -v curl >/dev/null 2>&1; then
+      ip=$(curl -s --connect-timeout 5 --max-time 10 "${service}" 2>/dev/null | grep -oE '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$' | head -n1)
+    elif command -v wget >/dev/null 2>&1; then
+      ip=$(wget -qO- --timeout=10 "${service}" 2>/dev/null | grep -oE '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$' | head -n1)
+    fi
+    
+    if [[ -n "${ip}" ]] && [[ "${ip}" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+      local first_octet="${ip%%.*}"
+      local second_octet="${ip#*.}"; second_octet="${second_octet%%.*}"
+      
+      if [[ "${first_octet}" -eq 10 ]] || \
+         [[ "${first_octet}" -eq 172 && "${second_octet}" -ge 16 && "${second_octet}" -le 31 ]] || \
+         [[ "${first_octet}" -eq 192 && "${second_octet}" -eq 168 ]] || \
+         [[ "${first_octet}" -eq 127 ]]; then
+        continue
+      fi
+      
+      echo "${ip}"
+      return 0
+    fi
+  done
+  
+  return 1
+}
+
 if [[ $EUID -ne 0 ]]; then
   echo "ERROR: This script must be run as root."
   exit 99
@@ -29,7 +68,6 @@ show_banner
 read -erp "Please input path to file: " src
 
 src="$(readlink -f -- "${src}" 2>/dev/null || printf "%s\n" "${src}")"
-
 
 declare -a CANDIDATES=(
   "/var/www/html"        
@@ -116,7 +154,7 @@ if ! command -v rsync >/dev/null 2>&1; then
 fi
 
 host="$(hostname -f)"
-public_ip="$(curl -s ifconfig.me 2>/dev/null || echo "")"
+public_ip="$(detect_public_ip || echo "")"
 base="$(basename -- "${src}")"
 
 echo "Copying file to web directory..."
@@ -135,8 +173,10 @@ if [[ ${COPY_SUCCESS} -eq 1 ]]; then
   echo "✓ Done: ${dst}/${base} (owner $(stat -c '%U:%G' "${dst}/${base}" 2>/dev/null), mode 644)"
   echo
   echo "📥 Download URL (hostname): http://${host}/${base}"
-  if [[ -n "${public_ip}" ]]; then
+  if [[ -n "${public_ip}" ]] && [[ "${public_ip}" != "ERROR" ]]; then
     echo "📥 Download URL (public IP): http://${public_ip}/${base}"
+  else
+    echo "⚠️  Could not detect public IP (services may be blocked in your region)"
   fi
 else
   echo "ERROR: Failed to copy file to ${dst}/${base}"
