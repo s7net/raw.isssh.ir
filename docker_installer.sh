@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "[+] Installing Docker using proxy only"
+echo "[+] Installing Docker using proxy"
 
 DOCKER_BASE="https://download-docker.isssh.ir"
 
