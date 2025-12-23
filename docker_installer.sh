@@ -1,12 +1,13 @@
 #!/bin/bash
 set -e
 
-# ---------- Safety checks ----------
+# ---------- Root check ----------
 if [ "$EUID" -ne 0 ]; then
   echo "[!] Please run as root"
   exit 1
 fi
 
+# ---------- systemd check ----------
 command -v systemctl >/dev/null || {
   echo "[!] systemd not found"
   exit 1
@@ -21,11 +22,8 @@ echo "[+] Docker installation started"
 
 # ---------- Proxy base ----------
 DOCKER_BASE="https://download-docker.isssh.ir"
-DOCKER_GPG_FINGERPRINT="9DC8 5822 9FC7 DD38 854A E2D8 8D81 803C 0EBF CD88"
-
 echo "[+] Using Docker proxy: $DOCKER_BASE"
 
-# ---------- Detect OS ----------
 . /etc/os-release
 
 # ---------- Debian / Ubuntu ----------
@@ -48,13 +46,6 @@ install_debian() {
 
   chmod a+r /etc/apt/keyrings/docker.asc
 
-  echo "[+] Verifying Docker GPG key"
-  gpg --show-keys /etc/apt/keyrings/docker.asc | \
-    grep -q "$DOCKER_GPG_FINGERPRINT" || {
-      echo "[!] Invalid Docker GPG key"
-      exit 1
-    }
-
   echo "[+] Adding Docker repository"
   echo \
     "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
@@ -67,9 +58,6 @@ install_debian() {
   apt-get install -y \
     docker-ce docker-ce-cli containerd.io \
     docker-buildx-plugin docker-compose-plugin
-
-  # Optional: prevent containerd mismatch
-  apt-mark hold containerd.io || true
 }
 
 # ---------- RHEL / CentOS / Alma / Rocky ----------
