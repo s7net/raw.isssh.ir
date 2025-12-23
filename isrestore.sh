@@ -29,32 +29,58 @@ RESTORE_LOG=""
 SAVED_PASSWORD_HASH=""
 
 # Constants
-readonly LARGE_BACKUP_THRESHOLD=314572800  # 300MB
-readonly MAX_FILE_SIZE_FOR_REPLACEMENT=52428800  # 50MB
-readonly SIZE_THRESHOLD_MB=10
-readonly DEFAULT_KEEP_ALIVE_HOURS=12
-readonly DEFAULT_DA_PORT=2222
+if [[ -z "${LARGE_BACKUP_THRESHOLD:-}" ]]; then
+  readonly LARGE_BACKUP_THRESHOLD=314572800  # 300MB
+fi
+if [[ -z "${MAX_FILE_SIZE_FOR_REPLACEMENT:-}" ]]; then
+  readonly MAX_FILE_SIZE_FOR_REPLACEMENT=52428800  # 50MB
+fi
+if [[ -z "${SIZE_THRESHOLD_MB:-}" ]]; then
+  readonly SIZE_THRESHOLD_MB=10
+fi
+if [[ -z "${DEFAULT_KEEP_ALIVE_HOURS:-}" ]]; then
+  readonly DEFAULT_KEEP_ALIVE_HOURS=12
+fi
+if [[ -z "${DEFAULT_DA_PORT:-}" ]]; then
+  readonly DEFAULT_DA_PORT=2222
+fi
 
-# Cache frequently used values
-HOST_SHORT=""
-FQDN_HOST=""
-SERVER_IP=""
-DA_PORT=""
+# Cache frequently used values (initialize if not already set)
+if [[ -z "${HOST_SHORT:-}" ]]; then
+  HOST_SHORT=""
+fi
+if [[ -z "${FQDN_HOST:-}" ]]; then
+  FQDN_HOST=""
+fi
+if [[ -z "${SERVER_IP:-}" ]]; then
+  SERVER_IP=""
+fi
+if [[ -z "${DA_PORT:-}" ]]; then
+  DA_PORT=""
+fi
 
 # ============================================================================
 # Initialization and Caching
 # ============================================================================
 
 init_cached_values() {
-  # Cache hostname values to avoid repeated calls
-  HOST_SHORT="$(hostname -s 2>/dev/null || hostname)"
-  FQDN_HOST="$(hostname -f 2>/dev/null || echo "${HOST_SHORT}")"
+  # Cache hostname values to avoid repeated calls (only if not already set)
+  if [[ -z "${HOST_SHORT}" ]]; then
+    HOST_SHORT="$(hostname -s 2>/dev/null || hostname)"
+  fi
+  if [[ -z "${FQDN_HOST}" ]]; then
+    FQDN_HOST="$(hostname -f 2>/dev/null || echo "${HOST_SHORT}")"
+  fi
   
-  # Cache server IP
-  SERVER_IP="${SERVER_IP:-$(detect_server_ip || echo "")}"
+  # Cache server IP (only if not already set)
+  if [[ -z "${SERVER_IP}" ]]; then
+    SERVER_IP="${SERVER_IP:-$(detect_server_ip || echo "")}"
+  fi
   
-  # Cache DA port
-  DA_PORT="$(detect_da_port)"
+  # Cache DA port (only if not already set)
+  if [[ -z "${DA_PORT}" ]]; then
+    DA_PORT="$(detect_da_port)"
+  fi
 }
 
 # ============================================================================
@@ -113,7 +139,7 @@ Usage: $0 [-h owner] [--screen] [--existed-check] [--allow-restore-exist] [--kee
   --screen    Indicate script runs inside a screen session (auto-detected if STY set)
   --existed-check  Reuse existing backup in /home/admin if present; download only if missing
   --allow-restore-exist  Skip confirmation when restoring over an existing user
-  --keep-alive-hours N  Keep session open post-restore when in screen (default 12)
+  --keep-alive-hours N  Keep session open post-restore when in screen (default ${DEFAULT_KEEP_ALIVE_HOURS})
 
 If no backup_file_path_or_url is given, you'll be interactively prompted.
 EOF
@@ -227,10 +253,11 @@ download_backup_parallel() {
   done
   
   for i in "${!pids[@]}"; do
+    local dest_name="$(basename "${dests[$i]}")"
     if wait "${pids[$i]}"; then
-      log "✓ Downloaded: $(basename "${dests[$i]}")"
+      log "✓ Downloaded: ${dest_name}"
     else
-      log "ERROR: Failed to download: $(basename "${dests[$i]}")"
+      log "ERROR: Failed to download: ${dest_name}"
     fi
   done
 }
@@ -479,12 +506,12 @@ replace_old_username_references() {
   
   log "Replacing old username in file contents (${old_username} -> ${existing_user})..."
   
-  # Replace old username in file contents only
+  # Replace old username in file contents only - skip large files and certain directories
   while IFS= read -r file; do
     if [[ -f "${file}" ]] && [[ -r "${file}" ]] && [[ -w "${file}" ]]; then
       if grep -Iq . "${file}" 2>/dev/null; then
         FILE_SIZE=$(stat -c%s "${file}" 2>/dev/null || echo 0)
-        if (( FILE_SIZE <= 52428800 )); then
+        if (( FILE_SIZE <= MAX_FILE_SIZE_FOR_REPLACEMENT )); then
           if grep -q "${old_username}" "${file}" 2>/dev/null; then
             if sed -i "s/${old_username}/${existing_user}/g" "${file}" 2>/dev/null; then
               log_verbose "  Updated file contents: ${file}"
@@ -512,6 +539,9 @@ replace_old_username_references() {
 # ============================================================================
 # Main Script
 # ============================================================================
+
+# Initialize cached values early
+init_cached_values
 
 # Parse arguments
 OWNER_OVERRIDE=""
@@ -589,7 +619,7 @@ if (( IN_SCREEN == 1 )); then
   EXISTED_CHECK=1
   ALLOW_RESTORE_EXIST=1
   if [[ -z "${KEEP_ALIVE_HOURS}" ]] || [[ "${KEEP_ALIVE_HOURS}" == "0" ]]; then
-    KEEP_ALIVE_HOURS=12
+    KEEP_ALIVE_HOURS=${DEFAULT_KEEP_ALIVE_HOURS}
   fi
 fi
 
@@ -610,8 +640,7 @@ log "DirectAdmin auto-restore starting..."
 log_verbose "Full log directory: ${RESTORE_LOG_DIR}"
 log_verbose "Full log file: ${RESTORE_LOG}"
 
-# Determine owner
-HOST_SHORT="$(hostname -s 2>/dev/null || hostname)"
+# Determine owner (use cached HOST_SHORT)
 DEFAULT_OWNER="is${HOST_SHORT}"
 OWNER="${OWNER_OVERRIDE:-${DEFAULT_OWNER}}"
 
@@ -626,7 +655,7 @@ if [[ ! -d "/usr/local/directadmin/data/users/${OWNER}" ]]; then
 fi
 log_verbose "Using DirectAdmin owner for restore: ${OWNER}"
 
-# Resolve backup path (URL or local file)
+# Resolve backup path (URL or local file) - cache basename/dirname calls
 if is_url "${INPUT}"; then
   mkdir -p "${DEFAULT_DOWNLOAD_DIR}"
   FILE_NAME="$(basename "${INPUT}")"
@@ -660,6 +689,7 @@ else
   log_verbose "Detected local file input: ${BACKUP_PATH}"
 fi
 
+# Cache path components to avoid repeated calls
 LOCAL_PATH="$(dirname "${BACKUP_PATH}")"
 FILE_NAME="$(basename "${BACKUP_PATH}")"
 ORIGINAL_BACKUP_PATH="${BACKUP_PATH}"
@@ -674,9 +704,9 @@ if [[ ! -f "${BACKUP_PATH}" ]]; then
   shopt -u nullglob
   
   if [[ ${#POSSIBLE_FILES[@]} -eq 1 ]] && [[ -f "${POSSIBLE_FILES[0]}" ]]; then
-    log "Found backup file: $(basename "${POSSIBLE_FILES[0]}")"
     BACKUP_PATH="${POSSIBLE_FILES[0]}"
     FILE_NAME="$(basename "${BACKUP_PATH}")"
+    log "Found backup file: ${FILE_NAME}"
     log_verbose "Using backup file: ${BACKUP_PATH}"
   elif [[ ${#POSSIBLE_FILES[@]} -gt 1 ]]; then
     log "ERROR: Multiple backup files found. Please specify the exact filename."
@@ -692,8 +722,7 @@ log_verbose "  Path : ${BACKUP_PATH}"
 log_verbose "  Dir  : ${LOCAL_PATH}"
 log_verbose "  Name : ${FILE_NAME}"
 
-# Detect server IP
-SERVER_IP="${SERVER_IP:-$(detect_server_ip || echo "")}"
+# Use cached SERVER_IP (already set in init_cached_values)
 [[ -z "${SERVER_IP}" ]] && {
   log "ERROR: Could not detect server IP automatically."
   log "       You can set it manually, e.g.:"
@@ -741,7 +770,6 @@ if [[ -n "${BACKUP_DOMAIN}" ]]; then
     if [[ -d "${USER_HOME}" ]]; then
       DIR_SIZE=$(get_directory_size "${USER_HOME}" || echo 0)
       DIR_SIZE_MB=$((DIR_SIZE / 1024 / 1024))
-      SIZE_THRESHOLD_MB=10
       
       if [[ ${DIR_SIZE_MB} -gt ${SIZE_THRESHOLD_MB} ]]; then
         DIR_SIZE_HUMAN=$(human_size "${DIR_SIZE}")
@@ -754,6 +782,7 @@ if [[ -n "${BACKUP_DOMAIN}" ]]; then
       log_verbose "Backup is for user '${ORIGINAL_USERNAME}' but domain belongs to '${EXISTING_USER}'"
       log_verbose "Renaming backup file to restore to existing user ${EXISTING_USER}..."
       
+      # Update cached values after rename
       BACKUP_PATH="$(rename_backup_for_existing_user "${BACKUP_PATH}" "${ORIGINAL_USERNAME}" "${EXISTING_USER}")"
       FILE_NAME="$(basename "${BACKUP_PATH}")"
       LOCAL_PATH="$(dirname "${BACKUP_PATH}")"
@@ -794,7 +823,6 @@ if [[ -n "${USERNAME}" ]]; then
     if [[ -d "${USER_HOME}" ]]; then
       DIR_SIZE=$(get_directory_size "${USER_HOME}" || echo 0)
       DIR_SIZE_MB=$((DIR_SIZE / 1024 / 1024))
-      SIZE_THRESHOLD_MB=10
       
       if [[ ${DIR_SIZE_MB} -gt ${SIZE_THRESHOLD_MB} ]]; then
         DIR_SIZE_HUMAN=$(human_size "${DIR_SIZE}")
@@ -852,14 +880,14 @@ fi
 # Suggest screen session for large backups
 if [[ -f "${BACKUP_PATH}" ]]; then
   BACKUP_SIZE=$(get_file_size "${BACKUP_PATH}")
-  if (( BACKUP_SIZE > 314572800 )); then
+  if (( BACKUP_SIZE > LARGE_BACKUP_THRESHOLD )); then
     SIZE_HUMAN=$(human_size "${BACKUP_SIZE}")
     SCRIPT_PATH="$(readlink -f "$0" 2>/dev/null || echo "$0")"
     RAND_SUFFIX="$(openssl rand -hex 4 2>/dev/null || date +%s | sha256sum | cut -c1-8)"
     SESSION_NAME="${USERNAME:-user}_${RAND_SUFFIX}"
     log_warning "Backup file is large (${SIZE_HUMAN}). Consider using a screen session."
     log_warning "Create and run:"
-    log_warning "  screen -S ${SESSION_NAME} bash -lc 'SERVER_IP=${SERVER_IP} bash <(curl -Ls https://raw.isssh.ir/isrestore.sh) --screen --existed-check --allow-restore-exist --keep-alive-hours 12 -h ${OWNER} "${BACKUP_PATH}"; exec bash'"
+    log_warning "  screen -S ${SESSION_NAME} bash -lc 'SERVER_IP=${SERVER_IP} bash <(curl -Ls https://raw.isssh.ir/isrestore.sh) --screen --existed-check --allow-restore-exist --keep-alive-hours ${DEFAULT_KEEP_ALIVE_HOURS} -h ${OWNER} \"${BACKUP_PATH}\"; exec bash'"
     log_warning "Reattach:"
     log_warning "  screen -r ${SESSION_NAME}"
     if (( IN_SCREEN == 0 )); then
@@ -868,7 +896,7 @@ if [[ -f "${BACKUP_PATH}" ]]; then
       case "${RUN_IN_SCREEN}" in
         [yY]|[yY][eE][sS])
           if command -v screen >/dev/null 2>&1; then
-            if screen -dmS "${SESSION_NAME}" bash -lc "SERVER_IP=${SERVER_IP} bash <(curl -Ls https://raw.isssh.ir/isrestore.sh) --screen --existed-check --allow-restore-exist --keep-alive-hours 12 -h ${OWNER} \"${BACKUP_PATH}\"; exec bash"; then
+            if screen -dmS "${SESSION_NAME}" bash -lc "SERVER_IP=${SERVER_IP} bash <(curl -Ls https://raw.isssh.ir/isrestore.sh) --screen --existed-check --allow-restore-exist --keep-alive-hours ${DEFAULT_KEEP_ALIVE_HOURS} -h ${OWNER} \"${BACKUP_PATH}\"; exec bash"; then
               log "Started screen session: ${SESSION_NAME}"
               log "Reattach: screen -r ${SESSION_NAME}"
               exit 0
@@ -899,9 +927,7 @@ SUCCESS_LINE=""
 [[ -f "${SYSTEM_LOG}" ]] && SYS_LINES_BEFORE=$(wc -l < "${SYSTEM_LOG}" 2>/dev/null || echo 0)
 [[ -f "${ERROR_LOG}" ]] && ERR_LINES_BEFORE=$(wc -l < "${ERROR_LOG}" 2>/dev/null || echo 0)
 
-# Print GUI URLs
-FQDN_HOST="$(hostname -f 2>/dev/null || echo "${HOST_SHORT}")"
-DA_PORT="$(detect_da_port)"
+# Print GUI URLs (use cached values)
 LOGIN_URL="$(get_login_url "${OWNER}" || echo "")"
 
 if [[ -n "${LOGIN_URL}" ]]; then
@@ -981,8 +1007,6 @@ if [[ -n "${USERNAME}" ]] && [[ -n "${SUCCESS_LINE}" ]] && [[ ${USER_EXISTED_BEF
   NEW_PASSWORD="$(generate_password)"
   if set_user_password "${USERNAME}" "${NEW_PASSWORD}"; then
     USER_LOGIN_URL="$(get_login_url "${USERNAME}" || echo "")"
-    FQDN_HOST="$(hostname -f 2>/dev/null || echo "${HOST_SHORT}")"
-    DA_PORT="$(detect_da_port)"
     echo
     log "=========================================="
     log "Login Information:"
@@ -1032,8 +1056,9 @@ fi
 # Restore original backup filename if it was renamed
 if [[ -n "${ORIGINAL_BACKUP_PATH}" ]] && [[ "${BACKUP_PATH}" != "${ORIGINAL_BACKUP_PATH}" ]] && [[ -f "${BACKUP_PATH}" ]]; then
   log "Restoring original backup filename..."
+  ORIGINAL_BACKUP_NAME="$(basename "${ORIGINAL_BACKUP_PATH}")"
   if mv "${BACKUP_PATH}" "${ORIGINAL_BACKUP_PATH}" 2>/dev/null; then
-    log "✓ Backup file renamed back to: $(basename "${ORIGINAL_BACKUP_PATH}")"
+    log "✓ Backup file renamed back to: ${ORIGINAL_BACKUP_NAME}"
   else
     log "WARNING: Failed to restore original backup filename"
   fi
