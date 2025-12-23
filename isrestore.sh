@@ -462,6 +462,15 @@ check_domain_exists() {
   return 1
 }
 
+get_user_creator() {
+  local username="$1"
+  local user_conf="/usr/local/directadmin/data/users/${username}/user.conf"
+  
+  if [[ -f "${user_conf}" ]]; then
+    grep -E '^creator=' "${user_conf}" 2>/dev/null | cut -d'=' -f2 | tr -d ' ' | head -n1
+  fi
+}
+
 rename_backup_for_existing_user() {
   local backup_path="$1"
   local source_user="$2"
@@ -748,12 +757,26 @@ if [[ -n "${BACKUP_DOMAIN}" ]]; then
   if [[ -n "${EXISTING_USER}" ]]; then
     USER_EXISTED_BEFORE_RESTORE=1
     ORIGINAL_USERNAME="$(parse_username_from_filename "${FILE_NAME}")"
+    
+    # Get the existing user's creator to avoid creator mismatch
+    EXISTING_USER_CREATOR="$(get_user_creator "${EXISTING_USER}" || echo "")"
+    if [[ -n "${EXISTING_USER_CREATOR}" ]]; then
+      log_verbose "Detected existing user '${EXISTING_USER}' creator: ${EXISTING_USER_CREATOR}"
+      # Override the owner to match existing user's creator
+      OWNER="${EXISTING_USER_CREATOR}"
+      log_verbose "Updated owner to match existing user's creator: ${OWNER}"
+    fi
+    
     echo
     log_warning "⚠️  USER ALREADY EXISTS: Domain '${BACKUP_DOMAIN}' belongs to user '${EXISTING_USER}'"
     if [[ -n "${ORIGINAL_USERNAME}" ]] && [[ "${ORIGINAL_USERNAME}" != "${EXISTING_USER}" ]]; then
       log_warning "⚠️  Restore will be performed on existing user '${EXISTING_USER}' (backup is for '${ORIGINAL_USERNAME}')"
     else
       log_warning "⚠️  Restore will be performed on existing user '${EXISTING_USER}'"
+    fi
+    
+    if [[ -n "${EXISTING_USER_CREATOR}" ]]; then
+      log_warning "⚠️  Using creator '${EXISTING_USER_CREATOR}' to match existing user"
     fi
     
     # Save current password hash before restore
@@ -809,6 +832,15 @@ if [[ -n "${USERNAME}" ]]; then
   if [[ -d "${USER_DIR}" ]] && [[ ${USER_EXISTED_BEFORE_RESTORE} -eq 0 ]]; then
     USER_EXISTED_BEFORE_RESTORE=1
     
+    # Get the existing user's creator to avoid creator mismatch
+    EXISTING_USER_CREATOR="$(get_user_creator "${USERNAME}" || echo "")"
+    if [[ -n "${EXISTING_USER_CREATOR}" ]]; then
+      log_verbose "Detected existing user '${USERNAME}' creator: ${EXISTING_USER_CREATOR}"
+      # Override the owner to match existing user's creator
+      OWNER="${EXISTING_USER_CREATOR}"
+      log_verbose "Updated owner to match existing user's creator: ${OWNER}"
+    fi
+    
     # Save current password hash before restore
     log_verbose "Saving current password hash for user ${USERNAME}..."
     SAVED_PASSWORD_HASH="$(save_password_hash "${USERNAME}" || echo "")"
@@ -855,6 +887,9 @@ if [[ -n "${USERNAME}" ]]; then
       log_verbose "Detected username from backup filename: ${USERNAME} (EXISTS on this server)"
       if (( ALLOW_RESTORE_EXIST == 1 )); then
         log_verbose "Auto-accepted overwrite restore for existing user ${USERNAME}."
+        if [[ -n "${EXISTING_USER_CREATOR}" ]]; then
+          log_verbose "Using creator '${EXISTING_USER_CREATOR}' to match existing user"
+        fi
       else
         echo
         read -erp "User ${USERNAME} already exists. Continue and restore over this existing user from backup? [y/N]: " CONFIRM
@@ -939,6 +974,11 @@ log_verbose "  Also available via IP: https://${SERVER_IP}:${DA_PORT}/evo/admin/
 
 # Run DirectAdmin restore
 log "Starting restore..."
+log_verbose "Restore parameters:"
+log_verbose "  Owner/Creator: ${OWNER}"
+log_verbose "  Target user: ${USERNAME:-"(will be created)"}"
+log_verbose "  Backup file: ${FILE_NAME}"
+log_verbose "  Server IP: ${SERVER_IP}"
 log_verbose "Full raw output will be appended to: ${RAW_LOG}"
 
 RESTORE_EXIT=0
