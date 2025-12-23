@@ -37,7 +37,10 @@ cat > /etc/docker/daemon.json <<EOF
 {
   "registry-mirrors": [
     "https://docker.arvancloud.ir",
-    "https://focker.ir"
+    "https://focker.ir",
+    "https://registry.docker.ir",
+    "https://docker.iranserver.com",
+    "https://docker.haiocloud.com"
   ]
 }
 EOF
